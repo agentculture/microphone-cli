@@ -155,7 +155,7 @@ wheels = [
 ]
 
 [[package]]
-name = "culture-agent-template"
+name = "microphone-cli"
 version = "0.8.0"
 source = { editable = "." }
 
