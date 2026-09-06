@@ -48,6 +48,25 @@ def test_unknown_command_errors(capsys: pytest.CaptureFixture[str]) -> None:
     assert "hint:" in err
 
 
+def test_startup_failure_in_parser_construction_is_a_structured_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A raise before `_dispatch`'s exception boundary must not leak a traceback."""
+    import microphone_cli.cli as cli_module
+
+    def _boom() -> argparse.ArgumentParser:
+        raise RuntimeError("registration exploded")
+
+    monkeypatch.setattr(cli_module, "_build_parser", _boom)
+
+    rc = cli_module.main(["list"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "error:" in err
+    assert "Traceback" not in err
+
+
 # --- whoami ---------------------------------------------------------------
 
 

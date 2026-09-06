@@ -480,6 +480,12 @@ def _decode(info: ParamInfo, data: bytes) -> Any:
     if info.type == "char":
         return body.rstrip(b"\x00").decode("utf-8", errors="ignore")
     if info.type == "uint8":
+        if len(body) < info.count:
+            raise CliError(
+                code=EXIT_ENV_ERROR,
+                message=f"short reply reading {info.name}: {len(body)} of {info.count} bytes",
+                remediation="Replug the device and retry.",
+            )
         return list(body[: info.count])
     fmt = {"float": "f", "radians": "f", "int32": "i", "uint32": "I", "uint16": "H"}[info.type]
     need = info.count * (2 if info.type in _HALF_TYPES else 4)
@@ -515,9 +521,13 @@ def _encode(info: ParamInfo, values: Sequence[Any] | str) -> bytes:
         if info.type in _FLOAT_TYPES:
             return struct.pack("<" + "f" * info.count, *(float(v) for v in values))
         if info.type == "uint8":
-            return bytes(bytearray(int(v) & 0xFF for v in values))
+            ints = [int(v) for v in values]
+            _check_int_range(info.name, ints, 0, 255, "uint8")
+            return bytes(bytearray(ints))
         if info.type in _HALF_TYPES:
-            return struct.pack("<" + "H" * info.count, *(int(v) for v in values))
+            ints = [int(v) for v in values]
+            _check_int_range(info.name, ints, 0, 65535, "uint16")
+            return struct.pack("<" + "H" * info.count, *ints)
         fmt = "i" if info.type == "int32" else "I"
         return struct.pack("<" + fmt * info.count, *(int(v) for v in values))
     except (TypeError, ValueError, struct.error) as exc:
@@ -526,3 +536,19 @@ def _encode(info: ParamInfo, values: Sequence[Any] | str) -> bytes:
             message=f"{info.name} value(s) not valid for type {info.type}: {exc}",
             remediation=f"Pass {info.count} value(s) that fit type {info.type}.",
         ) from exc
+
+
+def _check_int_range(name: str, ints: Sequence[int], lo: int, hi: int, type_name: str) -> None:
+    """Raise a user-facing :class:`CliError` naming the offending value and range.
+
+    ``& 0xFF``-style truncation silently turns -1 into 255 and 256 into 0, so this
+    check runs *before* any packing/masking — a bad value must be refused, not
+    silently reinterpreted and sent to the firmware.
+    """
+    for value in ints:
+        if not lo <= value <= hi:
+            raise CliError(
+                code=EXIT_USER_ERROR,
+                message=(f"{name} value {value} out of range for {type_name}: must be {lo}..{hi}"),
+                remediation=f"Pass value(s) in {lo}..{hi}.",
+            )

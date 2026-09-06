@@ -153,8 +153,22 @@ def _dispatch(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     # Pre-parse peek so argparse-level errors honour --json.
     _CliArgumentParser._json_hint = _argv_has_json(argv)
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    try:
+        parser = _build_parser()
+        args = parser.parse_args(argv)
+    except (SystemExit, KeyboardInterrupt):
+        # SystemExit: argparse's own --help/--version and _CliArgumentParser.error()
+        # already emitted the right thing (or nothing, for --help). Let both pass
+        # through unchanged.
+        raise
+    except Exception as err:  # noqa: BLE001 - last-resort; wrap and route cleanly
+        wrapped = CliError(
+            code=EXIT_USER_ERROR,
+            message=f"unexpected: {err.__class__.__name__}: {err}",
+            remediation=f"file a bug at {_ISSUES_URL}",
+        )
+        emit_error(wrapped, json_mode=_CliArgumentParser._json_hint)
+        return wrapped.code
 
     if args.command is None:
         parser.print_help()

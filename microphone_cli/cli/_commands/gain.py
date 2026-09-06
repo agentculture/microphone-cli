@@ -30,6 +30,7 @@ raw ``AUDIO_MGR_MIC_GAIN`` float — there is no range to map onto.
 from __future__ import annotations
 
 import argparse
+import math
 import subprocess  # nosec B404 - fixed argv, no shell; passed through to mixer.py
 from typing import Any
 
@@ -170,7 +171,25 @@ def cmd_gain_get(args: argparse.Namespace) -> int:
 
 
 def _clamp01(value: float) -> float:
+    # Belt-and-braces only: by the time this runs, _validate_gain_value has
+    # already refused anything outside 0.0..1.0 (and non-finite values), so
+    # this never actually clamps a real value.
     return max(0.0, min(1.0, value))
+
+
+def _validate_gain_value(value: float) -> None:
+    """Refuse a gain value before any planning or writing happens.
+
+    Applies to every ``--target`` (including the default ``both``): a bad
+    value must never reach ``_map_to_alsa``'s silent clamp or the firmware
+    write, for either knob.
+    """
+    if not math.isfinite(value) or not (0.0 <= value <= 1.0):
+        raise CliError(
+            code=EXIT_USER_ERROR,
+            message=f"gain value {value} is out of range",
+            remediation="pass a finite value in 0.0..1.0",
+        )
 
 
 def _map_to_alsa(value: float, control: mixer.MixerControl) -> int:
@@ -185,6 +204,7 @@ def cmd_gain_set(args: argparse.Namespace) -> int:
     target = getattr(args, "target", "both") or "both"
     value = float(args.value)
     apply = bool(getattr(args, "apply", False))
+    _validate_gain_value(value)
 
     device = resolve(args.device, root=root)
 
