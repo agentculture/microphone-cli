@@ -25,13 +25,18 @@ Three levels of hardware contact, and nothing in between:
   nothing: ``engine_checked`` is ``true``, ``hardware_touched`` stays ``false``.
 * **``--apply``** — requires the engine and the elements this encode choice
   actually emits, *enforces* access (a busy device is the typed exit-3 error,
-  never a silent wait), then spawns ``gst-launch-1.0`` inside an
-  :func:`microphone_cli.activation.activation_scope` so the action is written
-  to the activation log. Streams are unbounded by design; the pid is returned
-  so the caller can stop it.
+  never a silent wait), then spawns ``gst-launch-1.0`` with its stderr captured,
+  waits :data:`STARTUP_SETTLE_S` and polls it. A child that is already gone is
+  a typed exit-2 error quoting the pipeline's own first complaint — a stream
+  that died at negotiation is never reported as live. A child that is still
+  running is written to the activation log **open-ended**
+  (``ended_at: null``): the process outlives this command, so claiming an end
+  time would be a lie. Streams are unbounded by design; the pid is returned so
+  the caller can stop it.
 
-The spawn goes through the module-level :func:`_spawn` seam so tests can drive
-every path without a real subprocess.
+The spawn goes through the module-level :func:`_spawn` seam, and the settle
+wait through :func:`_sleep`, so tests can drive every path without a real
+subprocess.
 """
 
 from __future__ import annotations
@@ -41,11 +46,23 @@ import os
 import re
 import shlex
 import subprocess  # nosec B404 - the spawn seam; fixed argv, never a shell
+import tempfile
+import time
 from datetime import datetime, timezone
 
 from microphone_cli import access, activation, devices, engine
 from microphone_cli.cli._commands.overview import emit_overview
+from microphone_cli.cli._errors import EXIT_ENV_ERROR, CliError
 from microphone_cli.cli._output import emit_result
+
+#: How long to let a freshly spawned pipeline settle before deciding it is
+#: live. Long enough for gst-launch-1.0 to fail caps negotiation or fail to
+#: open the device (both happen in milliseconds), short enough not to be felt.
+STARTUP_SETTLE_S = 0.5
+#: How many lines of the child's stderr are quoted back in the remediation.
+STARTUP_DIAGNOSTIC_LINES = 4
+#: Substrings that mark a GStreamer stderr line as worth quoting.
+_DIAGNOSTIC_MARKERS = ("ERROR", "WARNING", "not-negotiated", "Could not", "failed")
 
 DEFAULT_PORT = 5000
 DEFAULT_HOST = "127.0.0.1"
@@ -153,18 +170,43 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _spawn(argv: list[str]) -> subprocess.Popen:
+def _spawn(argv: list[str], stderr: object = None) -> subprocess.Popen:
     """Spawn ``argv`` — the single seam every ``--apply`` path goes through.
 
     Fixed argv, never a shell. Tests monkeypatch this attribute, which is why
     it is a module-level function rather than an inline ``subprocess.Popen``
     call at the call site.
+
+    ``stderr`` is a writable file object the child's stderr is redirected to
+    (``None`` means discard it). It is a real file rather than a pipe on
+    purpose: nobody drains this child, and a pipe whose buffer fills would
+    wedge the very pipeline it was meant to diagnose.
     """
     return subprocess.Popen(  # nosec B603 - fixed argv built by engine.py, shell=False
         argv,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr if stderr is not None else subprocess.DEVNULL,
     )
+
+
+def _sleep(seconds: float) -> None:
+    """Sleep seam — patched in tests so the startup settle costs no wall clock."""
+    time.sleep(seconds)
+
+
+def _startup_diagnostic(text: str) -> list[str]:
+    """The first few meaningful lines of a dead pipeline's stderr.
+
+    GStreamer's failures are already one-line and human-readable
+    (``ERROR: from element ...: Internal data stream error``,
+    ``streaming stopped, reason not-negotiated (-4)``), so the honest thing is
+    to hand them back verbatim. Marked lines come first; if nothing matches,
+    any non-empty lines are quoted rather than pretending there was no output.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    marked = [line for line in lines if any(mark in line for mark in _DIAGNOSTIC_MARKERS)]
+    chosen = marked or lines
+    return chosen[:STARTUP_DIAGNOSTIC_LINES]
 
 
 def capture_node_path(device: devices.MicrophoneDevice, root: str = "/") -> str:
@@ -332,8 +374,10 @@ def _payload(
         "bounded": False,
         "lifetime": (
             "unbounded — the stream runs until the spawned gst-launch-1.0 is stopped "
-            "(SIGINT/SIGTERM) or exits. There is no duration cap by design; use "
-            "`microphone record` for a bounded artifact"
+            "(SIGINT/SIGTERM) or exits, outliving this command. There is no duration cap "
+            "by design; use `microphone record` for a bounded artifact. Its activation-log "
+            "line is therefore open-ended (ended_at: null) — nothing closes it, so a later "
+            "reader must not read it as a stream that has finished"
         ),
         "exclusive_access": (
             f"while this stream runs it holds {node} open — an ALSA capture PCM is "
@@ -344,6 +388,12 @@ def _payload(
         "consent": {
             "activation_log": str(activation.log_path()),
             "logged": applied,
+            "log_line": (
+                "written once, when the pipeline is confirmed running, with ended_at: null "
+                "and params.lifetime 'unbounded' — the line stays open because the stream "
+                "outlives this command; a startup failure instead logs a closed line "
+                "carrying params.error"
+            ),
             "bytes_written": (
                 "none — audio goes to the announced UDP attachment point only; no file, "
                 "no hidden buffer, and never to stdout"
@@ -381,6 +431,100 @@ def _required_elements(encode: str) -> list[str]:
     if encode == "opus":
         return ["audioconvert", "audioresample", "opusenc", "rtpopuspay", "udpsink"]
     return ["audioconvert", "rtpL16pay", "udpsink"]
+
+
+def _log_activation(
+    device_id: str, params: dict[str, object], started_at: str, *, ended_at: str | None
+) -> None:
+    """Append one activation line. ``ended_at=None`` means "still running"."""
+    activation.record_activation(
+        activation.Activation(
+            verb="stream audio",
+            device=device_id,
+            params=dict(params),
+            started_at=started_at,
+            ended_at=ended_at,
+        )
+    )
+
+
+def _read_child_stderr(handle) -> str:  # type: ignore[no-untyped-def]
+    """Read back everything the child wrote to its captured stderr file."""
+    try:
+        handle.seek(0)
+        raw = handle.read()
+    except OSError:  # pragma: no cover - a closed/unseekable capture file
+        return ""
+    return raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+
+
+def _launch(
+    *, device_id: str, node: str, argv: list[str], request: dict[str, object]
+) -> tuple[subprocess.Popen, str]:
+    """Spawn the pipeline, prove it is actually running, and log the activation.
+
+    Two things this deliberately does *not* do. It does not treat a successful
+    ``Popen`` as a live stream: gst-launch-1.0 exits within milliseconds when
+    caps cannot be negotiated or the device cannot be opened, so the child is
+    given :data:`STARTUP_SETTLE_S` and then polled, and a child that is already
+    gone becomes a typed exit-2 error quoting its own stderr (never a
+    traceback). And it does not stamp ``ended_at`` on a stream that is still
+    running: the activation line for a live stream is written open-ended, so
+    the audit says "started, still open" rather than "started and finished".
+
+    Returns ``(proc, started_at)``.
+    """
+    params = dict(request)
+    params["capture_node"] = node
+    params["pipeline"] = list(argv)
+    started_at = _now_iso()
+
+    # A real file, not a pipe: nothing drains this child, and a full pipe
+    # buffer would wedge the pipeline this capture exists to diagnose.
+    handle = tempfile.TemporaryFile(prefix="microphone-stream-", suffix=".stderr")
+    try:
+        try:
+            proc = _spawn(argv, stderr=handle)
+        except OSError as exc:
+            params["error"] = f"{type(exc).__name__}: {exc}"
+            _log_activation(device_id, params, started_at, ended_at=_now_iso())
+            raise CliError(
+                code=EXIT_ENV_ERROR,
+                message=f"could not start the stream pipeline: {exc}",
+                remediation="check that gst-launch-1.0 is on PATH and executable "
+                "(`microphone stream audio <device> --probe` reports the engine)",
+            ) from exc
+
+        params["pid"] = proc.pid
+        _sleep(STARTUP_SETTLE_S)
+        code = proc.poll()
+        if code is not None:
+            detail = _startup_diagnostic(_read_child_stderr(handle))
+            message = f"stream pipeline exited {code} during startup"
+            params["error"] = message
+            if detail:
+                params["pipeline_stderr"] = detail
+            _log_activation(device_id, params, started_at, ended_at=_now_iso())
+            quoted = " | ".join(detail)
+            raise CliError(
+                code=EXIT_ENV_ERROR,
+                message=message,
+                remediation=(
+                    f"the pipeline reported: {quoted}"
+                    if detail
+                    else "the pipeline wrote no diagnostics before exiting"
+                )
+                + "; run the printed pipeline by hand to see the rest, or re-run with "
+                "--rate/--channels/--format matching what `microphone inspect` reports "
+                "this device advertises",
+            )
+
+        params["lifetime"] = "unbounded"
+        _log_activation(device_id, params, started_at, ended_at=None)
+        return proc, started_at
+    finally:
+        # Our copy only; the child keeps its own descriptor.
+        handle.close()
 
 
 def cmd_stream_audio(args: argparse.Namespace) -> int:
@@ -451,13 +595,7 @@ def cmd_stream_audio(args: argparse.Namespace) -> int:
     # forbidden device is the typed error rather than a gst-launch crash.
     access.require_access(node, "audio")
 
-    params = dict(request)
-    params["capture_node"] = node
-    started_at = _now_iso()
-    with activation.activation_scope("stream audio", device.stable_id, params) as act:
-        proc = _spawn(argv)
-        act.params["pid"] = proc.pid
-        act.params["pipeline"] = list(argv)
+    proc, started_at = _launch(device_id=device.stable_id, node=node, argv=argv, request=request)
 
     data = _payload(
         device=device,
@@ -499,7 +637,9 @@ def stream_sections() -> list[dict[str, object]]:
                 "--probe: also detects the GStreamer engine and checks the capture node's "
                 "access state; still spawns nothing",
                 "--apply: requires the engine, enforces access (busy is exit 3), spawns the "
-                "pipeline and writes one activation-log line",
+                f"pipeline, waits {STARTUP_SETTLE_S:g}s and checks it is still alive (a "
+                "pipeline that died at startup is exit 2 quoting its own stderr), then "
+                "writes one open-ended activation-log line (ended_at: null)",
             ],
         },
         {

@@ -81,12 +81,17 @@ def ok_report(path: str) -> access.AccessReport:
 
 
 class FakeProc:
-    """A Popen-like stand-in: it has a pid and can be stopped, nothing else."""
+    """A Popen-like stand-in: it has a pid and can be stopped, nothing else.
 
-    def __init__(self) -> None:
+    ``returncode`` stays ``None`` unless a test passes one, so the default fake
+    is a *live* child — which is what the post-spawn settle check polls for. A
+    fake constructed with a return code is a pipeline that died at startup.
+    """
+
+    def __init__(self, returncode: int | None = None) -> None:
         self.pid = 4242
         self.terminated = False
-        self.returncode: int | None = None
+        self.returncode: int | None = returncode
 
     def poll(self) -> int | None:
         return self.returncode
@@ -278,18 +283,42 @@ def test_probe_without_the_engine_is_an_environment_error(
 # ---------------------------------------------------------------------------
 
 
-def _arm_apply(monkeypatch: pytest.MonkeyPatch) -> FakeProc:
-    proc = FakeProc()
+def _arm_apply(
+    monkeypatch: pytest.MonkeyPatch,
+    proc: FakeProc | None = None,
+    *,
+    stderr: bytes = b"",
+    slept: list[float] | None = None,
+) -> FakeProc:
+    """Wire the engine, access and spawn seams; return the child --apply gets.
+
+    ``stderr`` is written into the capture file the command hands the child, so
+    a dead fake child can be given the diagnostics a real gst-launch-1.0 would
+    have left behind.
+    """
+    child = proc if proc is not None else FakeProc()
+    child_stderr = stderr
+
+    def _fake_spawn(argv: list[str], stderr: object = None) -> FakeProc:
+        if child_stderr and stderr is not None:
+            stderr.write(child_stderr)  # type: ignore[attr-defined]
+            stderr.flush()  # type: ignore[attr-defined]
+        return child
+
     monkeypatch.setattr(engine, "detect", available_capability)
     monkeypatch.setattr(access, "check_access", lambda path, kind: ok_report(path))
-    monkeypatch.setattr(stream, "_spawn", lambda argv: proc)
-    return proc
+    monkeypatch.setattr(stream, "_spawn", _fake_spawn)
+    # The settle wait is a seam so the check costs no wall-clock time in tests.
+    recorded = slept if slept is not None else []
+    monkeypatch.setattr(stream, "_sleep", lambda seconds: recorded.append(seconds))
+    return child
 
 
 def test_apply_spawns_and_reports_the_pid(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _activation_log: str
 ) -> None:
-    proc = _arm_apply(monkeypatch)
+    slept: list[float] = []
+    proc = _arm_apply(monkeypatch, slept=slept)
     assert run(base_argv("--json", "--apply")) == 0
     data = payload(capsys)
     assert data["mode"] == "apply"
@@ -299,6 +328,9 @@ def test_apply_spawns_and_reports_the_pid(
     assert data["pid"] == proc.pid
     assert data["started_at"]
     assert data["access"]["state"] == "ok"
+    # The child was given a settle interval and then polled before being
+    # called live.
+    assert slept == [stream.STARTUP_SETTLE_S]
 
     lines = open(_activation_log, encoding="utf-8").read().strip().splitlines()
     assert len(lines) == 1
@@ -307,7 +339,60 @@ def test_apply_spawns_and_reports_the_pid(
     assert record["device"] == "usb-Pollen_Robotics_Reachy_Mini_Audio_RM0001"
     assert record["params"]["port"] == 5000
     assert record["params"]["pid"] == proc.pid
+
+
+def test_a_live_stream_is_logged_open_ended(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _activation_log: str
+) -> None:
+    """The stream outlives the command, so its log line must stay open."""
+    proc = _arm_apply(monkeypatch)
+    assert run(base_argv("--json", "--apply")) == 0
+    data = payload(capsys)
+
+    record = json.loads(open(_activation_log, encoding="utf-8").read().strip())
+    assert record["ended_at"] is None
+    assert record["params"]["pid"] == proc.pid
+    assert record["params"]["lifetime"] == "unbounded"
+    assert "error" not in record["params"]
+    # And the payload says so, rather than leaving a reader to guess.
+    assert "ended_at: null" in data["lifetime"]
+    assert "ended_at: null" in data["consent"]["log_line"]
+
+
+def test_a_pipeline_that_dies_at_startup_is_an_environment_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], _activation_log: str
+) -> None:
+    """A dead child is never reported as a live stream — and it says why."""
+    _arm_apply(
+        monkeypatch,
+        FakeProc(returncode=1),
+        stderr=(
+            b"Setting pipeline to PAUSED ...\n"
+            b"ERROR: from element /GstPipeline:pipeline0/GstAlsaSrc:alsasrc0: "
+            b"Internal data stream error.\n"
+            b"streaming stopped, reason not-negotiated (-4)\n"
+        ),
+    )
+    assert run(base_argv("--apply")) == 2
+    err = capsys.readouterr().err
+    assert "stream pipeline exited 1 during startup" in err
+    assert "not-negotiated" in err
+    assert "Traceback" not in err
+
+    record = json.loads(open(_activation_log, encoding="utf-8").read().strip())
     assert record["ended_at"]
+    assert record["params"]["error"] == "stream pipeline exited 1 during startup"
+    assert any("not-negotiated" in line for line in record["params"]["pipeline_stderr"])
+
+
+def test_a_pipeline_that_dies_silently_still_fails_cleanly(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _arm_apply(monkeypatch, FakeProc(returncode=255))
+    assert run(base_argv("--apply")) == 2
+    err = capsys.readouterr().err
+    assert "stream pipeline exited 255 during startup" in err
+    assert "no diagnostics" in err
 
 
 def test_apply_passes_the_built_argv_to_the_spawn_seam(
@@ -317,7 +402,8 @@ def test_apply_passes_the_built_argv_to_the_spawn_seam(
     proc = FakeProc()
     monkeypatch.setattr(engine, "detect", available_capability)
     monkeypatch.setattr(access, "check_access", lambda path, kind: ok_report(path))
-    monkeypatch.setattr(stream, "_spawn", lambda argv: seen.append(list(argv)) or proc)
+    monkeypatch.setattr(stream, "_sleep", lambda seconds: None)
+    monkeypatch.setattr(stream, "_spawn", lambda argv, stderr=None: seen.append(list(argv)) or proc)
     assert run(base_argv("--json", "--apply")) == 0
     assert seen and seen[0][:2] == ["gst-launch-1.0", "-e"]
     assert seen[0] == payload(capsys)["pipeline"]
@@ -338,7 +424,9 @@ def test_apply_on_a_busy_device_exits_three(
             holder=access.Holder(pid=11, command="arecord"),
         ),
     )
-    monkeypatch.setattr(stream, "_spawn", lambda argv: pytest.fail("spawned despite busy"))
+    monkeypatch.setattr(
+        stream, "_spawn", lambda argv, stderr=None: pytest.fail("spawned despite busy")
+    )
     assert run(base_argv("--apply")) == 3
     assert "busy" in capsys.readouterr().err
 
@@ -356,7 +444,9 @@ def test_apply_without_the_engine_exits_two(
             available=False,
         ),
     )
-    monkeypatch.setattr(stream, "_spawn", lambda argv: pytest.fail("spawned without an engine"))
+    monkeypatch.setattr(
+        stream, "_spawn", lambda argv, stderr=None: pytest.fail("spawned without an engine")
+    )
     assert run(base_argv("--apply")) == 2
     assert "error:" in capsys.readouterr().err
 
@@ -377,7 +467,9 @@ def test_apply_with_opus_requires_the_optional_elements(
         ),
     )
     monkeypatch.setattr(access, "check_access", lambda path, kind: ok_report(path))
-    monkeypatch.setattr(stream, "_spawn", lambda argv: pytest.fail("spawned without opusenc"))
+    monkeypatch.setattr(
+        stream, "_spawn", lambda argv, stderr=None: pytest.fail("spawned without opusenc")
+    )
     assert run(base_argv("--apply", "--encode", "opus")) == 2
     assert "opusenc" in capsys.readouterr().err
 

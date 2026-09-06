@@ -17,7 +17,11 @@ the flag set (lines 1408-1529), the dry-run payload keys (1051-1090) — ``mode`
 is self-limiting (``alsasrc num-buffers``, see
 :func:`microphone_cli.engine.build_audio_record_argv`) *and* this module polls
 the growing artifact and stops the child when either bound is reached. The
-JSON says which one won, in ``stopped_reason``.
+JSON says which one won, in ``stopped_reason``. Stopping the child means
+stopping it — SIGTERM, then SIGKILL, waiting for each — and if the finished
+artifact is nonetheless larger than ``--max-bytes`` (the cap is polled, so a
+pipeline can blow it and exit inside one interval) that is a typed exit-2
+error naming the size and the cap, not a successful bounded recording.
 
 Hardware contact is the same three-level split as ``stream audio`` — nothing
 (default), engine + access check (``--probe``), spawn (``--apply``) — and the
@@ -56,9 +60,15 @@ POLL_INTERVAL_S = 0.25
 #: argv is already self-limiting, so the wall-clock timer is a backstop for a
 #: pipeline that ignores its own bound, not the primary mechanism.
 STOP_GRACE_S = 2.0
-#: How long to wait for a terminated child to actually exit before giving up
-#: and reporting what is on disk.
+#: How long to wait for a SIGTERM'd child to actually exit before escalating
+#: to SIGKILL. A recording that outlives this verb keeps the capture PCM open,
+#: so "warn and return" is not an option — the caller would be told the bound
+#: stopped a recording that is in fact still running.
 TERMINATE_TIMEOUT_S = 5.0
+#: How long to wait for a SIGKILL'd child. Still alive after this and the
+#: recording is not stoppable from here: a typed environment error, never a
+#: successful bounded recording.
+KILL_TIMEOUT_S = 5.0
 
 _JSON_HELP = "Emit structured JSON."
 
@@ -348,23 +358,58 @@ def _artifact_size(path: str) -> int:
 
 
 def _stop(proc: subprocess.Popen) -> None:
-    """Terminate the child, then wait — bounded, and never left as a zombie."""
+    """Stop the child for real: SIGTERM, then SIGKILL, and wait for each.
+
+    This function only returns once the child is known to be gone. A child
+    that ignores SIGTERM is escalated to SIGKILL (with a diagnostic saying so)
+    and waited for again; a child that survives *that* is a
+    :class:`CliError` (exit 2), because returning here would let
+    :func:`_run_bounded` report a bound as having stopped a recording that is
+    in fact still running and still holding the capture device.
+    """
     try:
         proc.terminate()
-    except OSError:
+    except OSError as exc:
+        # Already reaped / already gone: nothing left to stop.
+        emit_diagnostic(f"warning: could not signal the recording pipeline: {exc}")
         return
     try:
         proc.wait(timeout=TERMINATE_TIMEOUT_S)
+        return
     except subprocess.TimeoutExpired:
-        # A child that ignores SIGTERM is reported, never silently swallowed:
-        # the artifact on disk is still what it is, so the run continues and
-        # says so on stderr rather than failing the whole recording.
         emit_diagnostic(
             f"warning: recording pipeline (pid {proc.pid}) did not exit within "
-            f"{TERMINATE_TIMEOUT_S:g}s of SIGTERM; reporting the bytes already on disk"
+            f"{TERMINATE_TIMEOUT_S:g}s of SIGTERM; escalating to SIGKILL"
         )
     except OSError as exc:
         emit_diagnostic(f"warning: could not wait for the recording pipeline: {exc}")
+        return
+
+    try:
+        proc.kill()
+        proc.wait(timeout=KILL_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        raise CliError(
+            code=EXIT_ENV_ERROR,
+            message=(
+                f"recording pipeline (pid {proc.pid}) survived SIGTERM and SIGKILL; "
+                "the recording is still running and its bound was not enforced"
+            ),
+            remediation=(
+                f"the process is likely stuck in uninterruptible I/O on the capture "
+                f"device — inspect it with `ps -o stat= -p {proc.pid}`, then unplug or "
+                "reset the device if it stays in D state"
+            ),
+        ) from exc
+    except OSError as exc:
+        raise CliError(
+            code=EXIT_ENV_ERROR,
+            message=(
+                f"could not kill the recording pipeline (pid {proc.pid}): {exc}; "
+                "the recording may still be running"
+            ),
+            remediation=f"check the process by hand (`ps -p {proc.pid}`) and stop it",
+        ) from exc
 
 
 def _run_bounded(
@@ -376,6 +421,12 @@ def _run_bounded(
     ran out, the normal path); ``"error"`` — it exited non-zero;
     ``"duration"`` / ``"max_bytes"`` — this loop stopped it because the child
     outlived its own bound or the artifact outgrew the size cap.
+
+    Returning is a claim that the child is gone: :func:`_stop` waits for it and
+    raises rather than returning while it lives. The reason says *why* the
+    recording ended; whether the artifact honoured ``max_bytes`` is a separate
+    question, checked against the file itself in :func:`_apply` — the exit
+    check below can fire in the same poll interval in which the cap was blown.
     """
     started = _monotonic()
     deadline = duration_s + STOP_GRACE_S
@@ -425,6 +476,26 @@ def _apply(
                 message=f"recording pipeline exited non-zero; wrote {size} bytes",
                 remediation="run the printed pipeline by hand to see gst-launch-1.0's own "
                 "diagnostics, or re-run with --probe to check the engine and device first",
+            )
+        if size > max_bytes:
+            # The cap is polled, so a pipeline that blows it and exits inside a
+            # single poll interval is never stopped by this module — the file on
+            # disk is over the cap the caller asked for, and saying "eos, all
+            # good" about it would be a lie. The artifact is deliberately kept:
+            # deleting a recording the caller may still want is not this verb's
+            # decision to make.
+            raise CliError(
+                code=EXIT_ENV_ERROR,
+                message=(
+                    f"recording exceeded its size cap: wrote {size} bytes, "
+                    f"--max-bytes is {max_bytes}"
+                ),
+                remediation=(
+                    f"the file was kept at {output_path} so you can decide what to do with "
+                    "it (inspect it, truncate it, delete it); re-run with a larger "
+                    "--max-bytes, a shorter --duration, or a lower rate/channel count if "
+                    "you want it to fit"
+                ),
             )
         if size == 0:
             raise CliError(

@@ -117,9 +117,70 @@ class FakeProc:
         return self._returncode
 
 
-def arm_apply(
-    monkeypatch: pytest.MonkeyPatch, proc: FakeProc, *, ticks: float = 1.0
-) -> list[float]:
+class StubbornProc:
+    """A child that ignores SIGTERM: only ``kill()`` ever ends it.
+
+    ``killable=False`` models the worse case — a process wedged in
+    uninterruptible I/O on the capture device, which SIGKILL cannot reap
+    either. ``wait()`` raises :class:`subprocess.TimeoutExpired` for as long as
+    the process is alive, exactly as :class:`subprocess.Popen` does.
+    """
+
+    def __init__(self, path: str, *, chunk: int = 16, killable: bool = True) -> None:
+        self.pid = 9191
+        self.path = path
+        self.chunk = chunk
+        self.killable = killable
+        self.terminated = False
+        self.killed = False
+        self._returncode: int | None = None
+
+    def poll(self) -> int | None:
+        with open(self.path, "ab") as handle:
+            handle.write(b"\0" * self.chunk)
+        return self._returncode
+
+    def terminate(self) -> None:
+        self.terminated = True  # ... and nothing else: SIGTERM is ignored.
+
+    def kill(self) -> None:
+        self.killed = True
+        if self.killable:
+            self._returncode = -9
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self._returncode is None:
+            raise subprocess.TimeoutExpired(cmd="gst-launch-1.0", timeout=timeout or 0)
+        return self._returncode
+
+
+class OversizeProc:
+    """Writes past the size cap and exits 0 within a single poll interval.
+
+    The bug this guards: the process-exit check ran before the artifact's size
+    was compared with the cap, so a finished-but-oversized recording was
+    reported as a clean ``eos``.
+    """
+
+    def __init__(self, path: str, *, total: int) -> None:
+        self.pid = 5150
+        self.path = path
+        self.total = total
+        self.terminated = False
+
+    def poll(self) -> int | None:
+        with open(self.path, "ab") as handle:
+            handle.write(b"\0" * self.total)
+        return 0
+
+    def terminate(self) -> None:  # pragma: no cover - it exited on its own
+        self.terminated = True
+
+    def wait(self, timeout: float | None = None) -> int:  # pragma: no cover
+        return 0
+
+
+def arm_apply(monkeypatch: pytest.MonkeyPatch, proc: object, *, ticks: float = 1.0) -> list[float]:
     """Wire every seam --apply uses; return the list sleeps were recorded into."""
     slept: list[float] = []
     clock = {"t": 0.0}
@@ -356,7 +417,10 @@ def test_apply_stops_on_the_max_bytes_bound(
     _activation_log: str,
 ) -> None:
     out_path = str(tmp_path / "clip.wav")
-    proc = FakeProc(out_path, chunk=64, exit_after=None)
+    # Two 50-byte writes land exactly on the cap: the loop stops the child at
+    # the bound and the artifact honours it, which is the success case. An
+    # artifact that ends up *over* the cap is an error — see the test below.
+    proc = FakeProc(out_path, chunk=50, exit_after=None)
     arm_apply(monkeypatch, proc)
 
     argv = base_argv(out_path, "--json", "--apply", "--duration", "600", "--max-bytes", "100")
@@ -364,9 +428,75 @@ def test_apply_stops_on_the_max_bytes_bound(
     data = payload(capsys)
     assert data["stopped_reason"] == "max_bytes"
     assert proc.terminated is True
-    assert data["bytes_written"] >= 100
+    assert data["bytes_written"] == 100
     entry = json.loads(open(_activation_log, encoding="utf-8").read().strip())
     assert entry["params"]["stopped_reason"] == "max_bytes"
+
+
+def test_a_child_that_ignores_sigterm_is_killed_before_the_bound_is_reported(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """SIGTERM ignored -> SIGKILL, waited for, and only then the bound reported."""
+    out_path = str(tmp_path / "clip.wav")
+    proc = StubbornProc(out_path, chunk=8)
+    arm_apply(monkeypatch, proc, ticks=1.0)
+
+    assert run(base_argv(out_path, "--json", "--apply", "--duration", "3")) == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert proc.terminated is True
+    assert proc.killed is True
+    assert data["stopped_reason"] == "duration"
+    assert data["bytes_written"] > 0
+    # The escalation is announced on stderr, and never mixed into stdout.
+    assert "SIGKILL" in captured.err
+
+
+def test_a_child_that_survives_sigkill_is_an_environment_error(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _activation_log: str,
+) -> None:
+    out_path = str(tmp_path / "clip.wav")
+    proc = StubbornProc(out_path, chunk=8, killable=False)
+    arm_apply(monkeypatch, proc, ticks=1.0)
+
+    assert run(base_argv(out_path, "--apply", "--duration", "3")) == 2
+    err = capsys.readouterr().err
+    assert proc.killed is True
+    assert "SIGKILL" in err
+    assert "error:" in err
+    # The failed run still leaves a completed activation record behind.
+    entry = json.loads(open(_activation_log, encoding="utf-8").read().strip())
+    assert entry["params"]["error"]
+    assert entry["ended_at"]
+
+
+def test_an_artifact_over_the_size_cap_is_an_environment_error(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    _activation_log: str,
+) -> None:
+    """A pipeline that blows the cap and exits between polls is not a success."""
+    out_path = str(tmp_path / "clip.wav")
+    proc = OversizeProc(out_path, total=200)
+    arm_apply(monkeypatch, proc)
+
+    argv = base_argv(out_path, "--apply", "--duration", "600", "--max-bytes", "100")
+    assert run(argv) == 2
+    err = capsys.readouterr().err
+    assert "200" in err and "100" in err
+    # The oversized file is kept, not deleted: that call is the caller's.
+    assert os.stat(out_path).st_size == 200
+    assert out_path in err
+
+    entry = json.loads(open(_activation_log, encoding="utf-8").read().strip())
+    assert entry["params"]["bytes_written"] == 200
+    assert entry["params"]["stopped_reason"] == "eos"
+    assert entry["params"]["error"]
+    assert entry["ended_at"]
 
 
 def test_apply_reports_a_failed_pipeline_as_an_environment_error(
