@@ -22,7 +22,7 @@ import json
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -166,6 +166,21 @@ def _ensure_log_writable(target: Path) -> None:
         ) from exc
 
 
+def _finished(activation: Activation, params: dict[str, object]) -> Activation:
+    """The closed-out twin of ``activation``: same identity, ``ended_at`` stamped now.
+
+    Built explicitly rather than via ``dataclasses.replace`` so static analysis
+    sees an :class:`Activation` flowing into the audit write (SonarCloud S5655).
+    """
+    return Activation(
+        verb=activation.verb,
+        device=activation.device,
+        params=dict(params),
+        started_at=activation.started_at,
+        ended_at=_now_iso(),
+    )
+
+
 def _record_or_report_applied(
     finished: Activation, *, verb: str, device: str, target: Path, path: Path | None
 ) -> None:
@@ -243,9 +258,9 @@ def activation_scope(
     except BaseException as exc:
         crash_params = dict(activation.params)
         crash_params.setdefault("error", f"{type(exc).__name__}: {exc}")
-        finished = replace(activation, ended_at=_now_iso(), params=crash_params)
+        finished = _finished(activation, crash_params)
         _record_or_report_applied(finished, verb=verb, device=device, target=target, path=path)
         raise
     else:
-        finished = replace(activation, ended_at=_now_iso())
+        finished = _finished(activation, activation.params)
         _record_or_report_applied(finished, verb=verb, device=device, target=target, path=path)

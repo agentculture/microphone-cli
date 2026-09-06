@@ -54,9 +54,11 @@ _NUMID_RE = re.compile(
     r"(?:,index=(?P<index>\d+))?$"
 )
 # "; type=INTEGER,access=rw---R--,values=1,min=0,max=30,step=0"
-_ATTR_RE = re.compile(r"^;\s*type=(?P<type>[^,]+),access=(?P<access>[^,]+),(?P<rest>.*)$")
+_ATTR_RE = re.compile(r"^;\s*type=(?P<type>[^,]+),access=(?P<access>[^,]+),(?P<rest>.*)")
 # ": values=20" or ": values=20,20"
-_VALUE_LINE_RE = re.compile(r"^:\s*values=(?P<values>.*)$")
+# No trailing ``$``: ``.*`` already runs to the end of the (single) line, and
+# the anchor only gives the engine a reason to backtrack (SonarCloud S8786).
+_VALUE_LINE_RE = re.compile(r"^:\s*values=(?P<values>.*)")
 _KV_RE = re.compile(r"(\w+)=(-?\d+)")
 
 _PREFERRED_NAME_HINTS = ("capture volume", "mic")
