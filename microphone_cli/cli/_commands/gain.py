@@ -36,6 +36,7 @@ from typing import Any
 
 from microphone_cli import mixer
 from microphone_cli.activation import activation_scope
+from microphone_cli.cli._commands import JSON_FLAG_HELP
 from microphone_cli.cli._commands.overview import emit_overview
 from microphone_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from microphone_cli.cli._output import emit_result
@@ -68,13 +69,12 @@ def _sections() -> list[dict[str, object]]:
     ]
 
 
-def cmd_gain_overview(args: argparse.Namespace) -> int:
+def cmd_gain_overview(args: argparse.Namespace) -> None:
     emit_overview("microphone gain", _sections(), json_mode=bool(getattr(args, "json", False)))
-    return 0
 
 
-def _no_verb(args: argparse.Namespace) -> int:
-    return cmd_gain_overview(args)
+def _no_verb(args: argparse.Namespace) -> None:
+    cmd_gain_overview(args)
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ def _alsa_payload(control: mixer.MixerControl) -> dict[str, object]:
     }
 
 
-def cmd_gain_get(args: argparse.Namespace) -> int:
+def cmd_gain_get(args: argparse.Namespace) -> None:
     json_mode = bool(getattr(args, "json", False))
     root = getattr(args, "root", "/") or "/"
     device = resolve(args.device, root=root)
@@ -162,7 +162,6 @@ def cmd_gain_get(args: argparse.Namespace) -> int:
         else:
             lines.append(f"firmware: mic_gain = {firmware['mic_gain']}")
         emit_result("\n".join(lines), json_mode=False)
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +197,7 @@ def _map_to_alsa(value: float, control: mixer.MixerControl) -> int:
     return round(lo + _clamp01(value) * (hi - lo))
 
 
-def cmd_gain_set(args: argparse.Namespace) -> int:
+def cmd_gain_set(args: argparse.Namespace) -> None:
     json_mode = bool(getattr(args, "json", False))
     root = getattr(args, "root", "/") or "/"
     target = getattr(args, "target", "both") or "both"
@@ -229,7 +228,6 @@ def cmd_gain_set(args: argparse.Namespace) -> int:
         emit_result(payload, json_mode=True)
     else:
         emit_result(_render_set_text(payload), json_mode=False)
-    return 0
 
 
 def _plan(
@@ -315,20 +313,20 @@ def register(sub: argparse._SubParsersAction) -> None:
         "gain",
         help="Read/set microphone capture gain (see 'microphone gain overview').",
     )
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     p.set_defaults(func=_no_verb, json=False)
     # Propagate parser_class so nested verbs route parse-time errors through the
     # structured CliError contract instead of argparse's default exit(2).
     noun_sub = p.add_subparsers(dest="gain_command", parser_class=type(p))
 
     ov = noun_sub.add_parser("overview", help="Describe the gain verb group.")
-    ov.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    ov.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     ov.set_defaults(func=cmd_gain_overview)
 
     get = noun_sub.add_parser("get", help="Read the current ALSA and firmware gain.")
     get.add_argument("device", help="A microphone selector (stable id, serial, card id, ...).")
     get.add_argument("--root", default="/", help="Root to resolve devices under (testing).")
-    get.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    get.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     get.set_defaults(func=cmd_gain_get)
 
     set_ = noun_sub.add_parser("set", help="Plan or apply a new capture gain.")
@@ -346,5 +344,5 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="Which gain(s) to set (default: both, where available).",
     )
     set_.add_argument("--root", default="/", help="Root to resolve devices under (testing).")
-    set_.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    set_.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     set_.set_defaults(func=cmd_gain_set)

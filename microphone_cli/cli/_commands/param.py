@@ -30,6 +30,7 @@ import argparse
 from typing import Any
 
 from microphone_cli.activation import activation_scope
+from microphone_cli.cli._commands import JSON_FLAG_HELP
 from microphone_cli.cli._commands.overview import emit_overview
 from microphone_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from microphone_cli.cli._output import emit_result
@@ -74,18 +75,17 @@ def _sections() -> list[dict[str, object]]:
     ]
 
 
-def cmd_param_overview(args: argparse.Namespace) -> int:
+def cmd_param_overview(args: argparse.Namespace) -> None:
     emit_overview(
         "microphone param",
         _sections(),
         json_mode=bool(getattr(args, "json", False)),
     )
-    return 0
 
 
-def _no_verb(args: argparse.Namespace) -> int:
+def _no_verb(args: argparse.Namespace) -> None:
     # `microphone param` with no sub-verb prints the noun's overview.
-    return cmd_param_overview(args)
+    cmd_param_overview(args)
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ def _parse_values(info: ParamInfo, tokens: list[str]) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def cmd_param_list(args: argparse.Namespace) -> int:
+def cmd_param_list(args: argparse.Namespace) -> None:
     json_mode = bool(getattr(args, "json", False))
     vendor = getattr(args, "vendor", None)
     table = parameters_for(vendor)
@@ -182,7 +182,7 @@ def cmd_param_list(args: argparse.Namespace) -> int:
     }
     if json_mode:
         emit_result(payload, json_mode=True)
-        return 0
+        return
     lines = [
         f"{info.name}  resid={info.resid} cmdid={info.cmdid} count={info.count} "
         f"access={info.access} type={info.type} persistent={info.persistent}"
@@ -190,7 +190,6 @@ def cmd_param_list(args: argparse.Namespace) -> int:
     ]
     lines.append(f"({len(infos)} parameters)")
     emit_result("\n".join(lines), json_mode=False)
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +197,7 @@ def cmd_param_list(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def cmd_param_get(args: argparse.Namespace) -> int:
+def cmd_param_get(args: argparse.Namespace) -> None:
     json_mode = bool(getattr(args, "json", False))
     root = getattr(args, "root", "/") or "/"
 
@@ -218,9 +217,8 @@ def cmd_param_get(args: argparse.Namespace) -> int:
     payload = {"device": device.stable_id, "param": info.to_dict(), "values": values}
     if json_mode:
         emit_result(payload, json_mode=True)
-        return 0
+        return
     emit_result(f"{info.name} = {values}", json_mode=False)
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +226,7 @@ def cmd_param_get(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def cmd_param_set(args: argparse.Namespace) -> int:
+def cmd_param_set(args: argparse.Namespace) -> None:
     json_mode = bool(getattr(args, "json", False))
     root = getattr(args, "root", "/") or "/"
     apply = bool(getattr(args, "apply", False))
@@ -262,7 +260,7 @@ def cmd_param_set(args: argparse.Namespace) -> int:
                 "(pass --apply to send it)",
                 json_mode=False,
             )
-        return 0
+        return
 
     if info.persistent and not allow_persistent:
         raise CliError(
@@ -302,7 +300,6 @@ def cmd_param_set(args: argparse.Namespace) -> int:
             f"applied: {info.name} = {values} on {device.stable_id}{suffix}",
             json_mode=False,
         )
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -315,16 +312,16 @@ def register(sub: argparse._SubParsersAction) -> None:
         "param",
         help="Read/write raw XVF3800 firmware parameters (see 'microphone param overview').",
     )
-    p.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    p.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     p.set_defaults(func=_no_verb, json=False)
     noun_sub = p.add_subparsers(dest="param_command", parser_class=type(p))
 
     ov = noun_sub.add_parser("overview", help="Describe the param noun (verbs, persistent tier).")
-    ov.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    ov.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     ov.set_defaults(func=cmd_param_overview)
 
     lst = noun_sub.add_parser("list", help="List every XVF3800 parameter table row.")
-    lst.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    lst.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     lst.add_argument(
         "--vendor",
         default=None,
@@ -343,7 +340,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         default="/",
         help="Root filesystem to resolve the device under (tests point this at a fixture tree).",
     )
-    get.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    get.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     get.set_defaults(func=cmd_param_get)
 
     st = noun_sub.add_parser("set", help="Write one parameter on a microphone array.")
@@ -366,5 +363,5 @@ def register(sub: argparse._SubParsersAction) -> None:
         default="/",
         help="Root filesystem to resolve the device under (tests point this at a fixture tree).",
     )
-    st.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    st.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     st.set_defaults(func=cmd_param_set)

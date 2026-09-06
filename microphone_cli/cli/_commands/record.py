@@ -35,9 +35,11 @@ import os
 import shlex
 import subprocess  # nosec B404 - the spawn seam; fixed argv, never a shell
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from microphone_cli import access, activation, devices, engine
+from microphone_cli.cli._commands import JSON_FLAG_HELP
 from microphone_cli.cli._commands.stream import (
     DEFAULT_CHANNELS,
     DEFAULT_RATE,
@@ -70,7 +72,6 @@ TERMINATE_TIMEOUT_S = 5.0
 #: successful bounded recording.
 KILL_TIMEOUT_S = 5.0
 
-_JSON_HELP = "Emit structured JSON."
 
 #: Container per output extension. An unknown extension is a typed user error:
 #: guessing a container for a caller would silently produce a file that is not
@@ -255,17 +256,29 @@ def _engine_state(cap: engine.Capability | None) -> dict[str, object]:
     }
 
 
+@dataclass(frozen=True)
+class _Plan:
+    """The validated request: what to write, in what shape, under what bounds.
+
+    Built once in :func:`cmd_record` and passed whole, so the payload, the
+    activation params and the apply loop all read the same numbers instead of
+    threading six arguments each.
+    """
+
+    container: str
+    fmt: engine.AudioFormat
+    fmt_source: dict[str, str]
+    duration_s: float
+    max_bytes: int
+    output_path: str
+
+
 def _payload(
     *,
     device: devices.MicrophoneDevice,
     selector: str,
     node: str,
-    container: str,
-    fmt: engine.AudioFormat,
-    fmt_source: dict[str, str] | None = None,
-    duration_s: float,
-    max_bytes: int,
-    output_path: str,
+    plan: _Plan,
     argv: list[str],
     mode: str,
     cap: engine.Capability | None,
@@ -273,6 +286,7 @@ def _payload(
     resolved_at: str,
 ) -> dict[str, object]:
     applied = mode == "apply"
+    fmt = plan.fmt
     device_dict = device.as_dict()
     device_dict["selector"] = selector
     return {
@@ -282,7 +296,7 @@ def _payload(
         "engine_checked": cap is not None,
         "device": device_dict,
         "kind": "audio",
-        "container": container,
+        "container": plan.container,
         "capture_node": node,
         "audio_address": device.alsa_address,
         "audio_format": {
@@ -290,7 +304,7 @@ def _payload(
                 "rate": fmt.rate,
                 "channels": fmt.channels,
                 "sample_format": fmt.sample_format,
-                "source": fmt_source or {},
+                "source": plan.fmt_source or {},
             },
             "planned": {
                 "rate": fmt.rate,
@@ -306,14 +320,14 @@ def _payload(
         "pipeline_preview": list(argv),
         "pipeline_preview_str": " ".join(shlex.quote(token) for token in argv),
         "bound": {
-            "duration_s": duration_s,
-            "max_bytes": max_bytes,
+            "duration_s": plan.duration_s,
+            "max_bytes": plan.max_bytes,
             "unbounded_is_impossible": True,
         },
         "warmup_s": 0.0,
         "warmup_basis": _WARMUP_BASIS,
-        "output_path": output_path,
-        "would_write": [output_path],
+        "output_path": plan.output_path,
+        "would_write": [plan.output_path],
         "access": access_state,
         "engine": _engine_state(cap),
         "timestamps": {"resolved_at": resolved_at},
@@ -448,9 +462,7 @@ def _apply(
     device: devices.MicrophoneDevice,
     node: str,
     argv: list[str],
-    output_path: str,
-    duration_s: float,
-    max_bytes: int,
+    plan: _Plan,
     params: dict[str, object],
 ) -> tuple[str, int, str, str]:
     """Enforce access, spawn, bound, and record the activation.
@@ -461,11 +473,14 @@ def _apply(
     # (exit 2) device is a typed error rather than a gst-launch crash.
     access.require_access(node, "audio")
 
+    output_path = plan.output_path
+    max_bytes = plan.max_bytes
+
     started_at = _now_iso()
     with activation.activation_scope("record", device.stable_id, params) as act:
         proc = _spawn(argv)
         act.params["pid"] = proc.pid
-        stopped_reason = _run_bounded(proc, output_path, duration_s, max_bytes)
+        stopped_reason = _run_bounded(proc, output_path, plan.duration_s, max_bytes)
         size = _artifact_size(output_path)
         act.params["stopped_reason"] = stopped_reason
         act.params["bytes_written"] = size
@@ -516,7 +531,7 @@ def _apply(
 # ---------------------------------------------------------------------------
 
 
-def cmd_record(args: argparse.Namespace) -> int:
+def cmd_record(args: argparse.Namespace) -> None:
     json_mode = bool(getattr(args, "json", False))
     root = getattr(args, "root", "/") or "/"
     resolved_at = _now_iso()
@@ -534,6 +549,15 @@ def cmd_record(args: argparse.Namespace) -> int:
         device.alsa_address, fmt, output_path, container=container, duration_s=duration_s
     )
 
+    plan = _Plan(
+        container=container,
+        fmt=fmt,
+        fmt_source=fmt_source,
+        duration_s=duration_s,
+        max_bytes=max_bytes,
+        output_path=output_path,
+    )
+
     apply_mode = bool(args.apply)
     probe_mode = bool(args.probe) or apply_mode
 
@@ -543,18 +567,18 @@ def cmd_record(args: argparse.Namespace) -> int:
         engine.require_elements(cap, _CONTAINER_ELEMENTS[container])
 
     access_state = _checked_access(node) if probe_mode else _paper_access(node)
-    mode = "apply" if apply_mode else ("probe" if probe_mode else "dry-run")
+    if apply_mode:
+        mode = "apply"
+    elif probe_mode:
+        mode = "probe"
+    else:
+        mode = "dry-run"
 
     data = _payload(
         device=device,
         selector=args.device,
         node=node,
-        container=container,
-        fmt=fmt,
-        fmt_source=fmt_source,
-        duration_s=duration_s,
-        max_bytes=max_bytes,
-        output_path=output_path,
+        plan=plan,
         argv=argv,
         mode=mode,
         cap=cap,
@@ -564,7 +588,7 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     if not apply_mode:
         _emit(data, json_mode=json_mode)
-        return 0
+        return
 
     params: dict[str, object] = {
         "output_path": output_path,
@@ -580,9 +604,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         device=device,
         node=node,
         argv=argv,
-        output_path=output_path,
-        duration_s=duration_s,
-        max_bytes=max_bytes,
+        plan=plan,
         params=params,
     )
 
@@ -596,7 +618,6 @@ def cmd_record(args: argparse.Namespace) -> int:
         "ended_at": ended_at,
     }
     _emit(data, json_mode=json_mode)
-    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -718,5 +739,5 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="Filesystem root to resolve the device under (default: /); mainly for "
         "pointing at a synthetic device tree in tests.",
     )
-    p.add_argument("--json", action="store_true", help=_JSON_HELP)
+    p.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     p.set_defaults(func=cmd_record)
