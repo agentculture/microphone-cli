@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-09-06T18:08:53Z",
-  "updated": "2026-09-06T18:19:20Z",
+  "updated": "2026-09-06T18:38:29Z",
   "claims": [
     {
       "id": "c1",
@@ -198,7 +198,7 @@
         {
           "id": "h23",
           "text": "record without --apply writes no file; with --apply the output is bounded by --duration/--max-bytes",
-          "status": "proposed",
+          "status": "confirmed",
           "instruction": ""
         }
       ],
@@ -529,6 +529,201 @@
           "reason": "formatting only: backtick angle-bracket tokens for markdownlint MD033"
         }
       ]
+    },
+    {
+      "id": "c27",
+      "kind": "assumption",
+      "text": "A reachy-mini-daemon (running locally today, pid 3180, and on the Reachy Mini at 192.168.1.162) polls DOA_VALUE_RADIANS on the same XVF3800 while the CLI runs; the firmware answers concurrent control reads with status 64 (SERVICER_COMMAND_RETRY) and the CLI must retry like audio_control_utils.py:250-275 (up to 100 attempts, 10 ms apart) rather than fail",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h24",
+          "text": "a fake ioctl that returns status 64 twice then 0 yields a successful read; a fake that returns 64 forever exits 2 with a 'device busy with another controller' hint",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c28",
+      "kind": "assumption",
+      "text": "stream audio and record reuse webcam_cli/engine.py's approach verbatim (cite-don't-import): alsasrc is a core element (engine.py:71), pulsesrc/pipewire are optional (engine.py:87), gst-launch-1.0 is shelled out and its absence is a typed exit 2; on this host gst-launch-1.0 and the pipewire source are present",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h25",
+          "text": "microphone_cli/engine.py's element list and require_engine() behaviour match webcam_cli/engine.py for the audio subset",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "assumption",
+      "text": "The XVF3800 PARAMETERS table is copied from reachy_mini audio_control_utils.py (Apache-2.0) with attribution, cite-don't-import; resid/cmdid values are firmware-build-specific, so 'inspect' on an array also reports VERSION, BLD_MSG and BLD_REPO_HASH (resid 48) so a mismatch is diagnosable",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "docs/ names the reachy_mini source file and license for the table; inspect --json on an array includes firmware.version and firmware.build",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "The stdlib control-transfer layer packs struct usbdevfs_ctrltransfer exactly as /usr/include/linux/usbdevice_fs.h:40-48 (u8 bRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, u32 timeout ms, void* data) and issues USBDEVFS_CONTROL = _IOWR('U', 0, struct); the node must be opened O_RDWR, so on a host without a udev rule /dev/bus/usb/BBB/DDD (default 0664 root:root) yields FORBIDDEN exit 2 whose remediation prints the udev rule line to add",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h27",
+          "text": "a unit test asserts struct.calcsize of the packed layout equals ctypes.sizeof(the ctypes Structure) and the ioctl number matches the header; the forbidden path's hint contains 'SUBSYSTEM==\"usb\", ATTR{idVendor}=='",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "Two arrays with the same VID:PID must be addressable: the stable id is built from the USB serial (sysfs 'serial' attr) with the sysfs device path as fallback; an ambiguous selector exits 1 listing candidates, as webcam_cli/devices.py:470-531 resolve() does",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h28",
+          "text": "a fixture tree with two 38fb:1001 devices resolves each by serial and rejects the bare product name as ambiguous",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "array doa --watch lifecycle: SIGINT ends the loop with exit 0 after flushing; device unplug mid-loop (ENODEV/ENOENT on the node) ends with exit 2 and one error object on stderr, never a traceback; each poll re-resolves nothing (the fd stays open) so USB bus/dev renumbering cannot silently switch devices",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h29",
+          "text": "a fake ioctl raising OSError(ENODEV) on the third poll produces exactly two stdout lines, one stderr error, exit 2",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "requirement",
+      "text": "param set treats persistence and destructive commands as a separate tier: SAVE_CONFIGURATION, CLEAR_CONFIGURATION, REBOOT, TEST_CORE_BURN, TEST_AEC_DISABLE_CONTROL and the SPECIAL_CMD_* filter/model uploads require --apply AND --allow-persistent, and the hint explains that every other rw write is volatile and reverts on power-cycle \u2014 that volatility is the rollback path",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h30",
+          "text": "param set REBOOT --apply without --allow-persistent exits 1 and sends nothing; the same with --allow-persistent sends the transfer and is written to the activation log",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c34",
+      "kind": "boundary",
+      "text": "param get|set accepts only names present in the table (case-insensitive match, echoed upper-case), rejects 'ro' targets on set and 'wo' targets on get, enforces value count and type before packing, and never lets the user supply raw resid/cmdid bytes",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h31",
+          "text": "param set on an unknown name, on a ro name, or with the wrong value count each exit 1 with a hint and issue no transfer",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c35",
+      "kind": "requirement",
+      "text": "Every --apply action (record, stream audio, gain set, aec set, param set) is appended to an activation log modelled on webcam_cli/activation.py: JSONL under XDG_STATE_HOME with a MICROPHONE_ACTIVATION_LOG override, recording verb, device stable id, parameters written, and timestamps, so a consumer or operator can audit what touched the microphone",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h32",
+          "text": "after gain set --apply the log's last line parses as JSON with verb, device, and the value written; without --apply nothing is appended",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c36",
+      "kind": "decision",
+      "text": "v1 targets a locally attached USB XVF3800 only. Non-goals: reaching a Reachy Mini over the network through its daemon REST, speech-to-text, text-to-speech, and speaker/monitor playback \u2014 those belong to the reachy_mini/reachy_nova stack; microphone-cli must coexist with that project holding the device (busy \u2192 exit 3, DoA/AEC reads still work via the firmware retry path)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "no network code in microphone_cli/; README Scope section lists STT/TTS/playback/remote as non-goals",
+      "revisions": []
+    },
+    {
+      "id": "c37",
+      "kind": "decision",
+      "text": "Sample format is not a first-class set verb: 'inspect' reports the formats/rates the card advertises (/proc/asound/cardN/stream0), and 'stream audio'/'record' negotiate with --rate/--channels/--format exactly as webcam-cli does; the firmware's USB_BIT_DEPTH (resid 48 cmd 8) changes the USB descriptor and needs re-enumeration, so it is reachable only via 'param set USB_BIT_DEPTH --apply --allow-persistent'. Rationale: ALSA hw-params negotiation is the portable path for every USB mic, the firmware knob is XVF3800-only and persistent",
+      "origin": "llm",
+      "status": "proposed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "inspect --json lists formats; record --format s16le --rate 16000 negotiates or exits 1 with the advertised list; param set USB_BIT_DEPTH without --allow-persistent exits 1",
+      "revisions": []
     }
   ],
   "open_vagueness": [
@@ -555,6 +750,24 @@
       "text": "PipeWire holds the ALSA device open while a session runs; whether 'inspect' can read /proc/asound/cardN/stream0 formats without EBUSY, and whether gain set via amixer is overridden by WirePlumber's saved state",
       "kind": "unknown_nonblocking",
       "claim_id": "c3",
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v4",
+      "text": "Whether the PARAMETERS resid/cmdid map is identical on the older 2886:001a ReSpeaker XVF3800 firmware that reachy_mini warns about; only the 38fb:1001 build is known to match",
+      "kind": "unknown_nonblocking",
+      "claim_id": "c29",
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v5",
+      "text": "The usbdevfs path is unverified against real hardware: no writable USB node exists on this host today (no device plugged, other nodes 0664 root:root), so the first end-to-end control transfer happens in issue #3",
+      "kind": "unknown_nonblocking",
+      "claim_id": "c30",
       "resolved": false,
       "resolution": "",
       "resolution_claim_id": null
@@ -672,8 +885,110 @@
       "seeds": [
         "c15"
       ]
+    },
+    {
+      "id": "s15",
+      "surface": "challenge pass / adjacent-systems lens: reachy_mini daemon routers/state.py:68,122 + audio_control_utils.py:250-275 + pgrep reachy-mini-daemon",
+      "finding": "the daemon reads DoA concurrently through the same vendor-control path; the firmware's retry status is the only arbitration, so the CLI must honour it",
+      "seeds": [
+        "c27"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "challenge pass / adjacent-systems lens: webcam_cli/engine.py:65-87,1052-1122 + which gst-launch-1.0",
+      "finding": "webcam-cli already solved GStreamer detection and alsasrc pipeline building for audio; reusing it avoids a second engine",
+      "seeds": [
+        "c28"
+      ]
+    },
+    {
+      "id": "s17",
+      "surface": "challenge pass / unstated-assumptions lens: reachy_mini LICENSE (Apache-2.0) + PARAMETERS table provenance",
+      "finding": "the table's provenance and firmware-specificity were nowhere in the frame",
+      "seeds": [
+        "c29"
+      ]
+    },
+    {
+      "id": "s18",
+      "surface": "challenge pass / unstated-assumptions lens: /usr/include/linux/usbdevice_fs.h:40-48,187 + ls -l /dev/bus/usb",
+      "finding": "the ioctl struct and number are verifiable from the header without hardware; permissions on a fresh host are the likely first failure",
+      "seeds": [
+        "c30"
+      ]
+    },
+    {
+      "id": "s19",
+      "surface": "challenge pass / overlooked-actors lens: webcam_cli/devices.py:470-531 resolve() + /sys/bus/usb/devices/*/serial",
+      "finding": "multi-array hosts were not considered; serial is the only stable discriminator",
+      "seeds": [
+        "c31"
+      ]
+    },
+    {
+      "id": "s20",
+      "surface": "challenge pass / lifecycle lens: --watch mode (decision c24) + reachy_mini examples/debug/sound_doa.py loop",
+      "finding": "the watch decision named the output format but not termination or unplug behaviour",
+      "seeds": [
+        "c32"
+      ]
+    },
+    {
+      "id": "s21",
+      "surface": "challenge pass / reversibility lens: PARAMETERS table 'wo' entries resid 48 (REBOOT/SAVE/CLEAR) and SPECIAL_CMD_* filter coefficient uploads",
+      "finding": "an unguarded generic escape hatch can persist or brick the array; volatile writes are self-reverting, persistent ones are not",
+      "seeds": [
+        "c33"
+      ]
+    },
+    {
+      "id": "s22",
+      "surface": "challenge pass / security lens: audio_control_utils.py write() validation (ro check, count check)",
+      "finding": "the SDK validates only ro and count; type validation and raw-byte refusal are additions",
+      "seeds": [
+        "c34"
+      ]
+    },
+    {
+      "id": "s23",
+      "surface": "challenge pass / observability-and-consent lens: webcam_cli/activation.py:28-129 + media-cli CLAUDE.md consent posture",
+      "finding": "the frame carried dry-run-by-default but no audit trail; microphones are privacy-sensitive and webcam-cli already has the pattern",
+      "seeds": [
+        "c35"
+      ]
+    },
+    {
+      "id": "s24",
+      "surface": "challenge pass / concurrency lens: PipeWire/WirePlumber (pgrep) + usbdevfs vs snd-usb-audio binding",
+      "finding": "clean beyond the retry assumption above and parked items v2/v3: device-recipient vendor control transfers do not need the audio interface claimed, so snd-usb-audio/PipeWire holding the PCM does not block DoA/AEC reads (the SDK never detaches the kernel driver); residual risk is only the ALSA mixer vs WirePlumber saved-state interplay already parked",
+      "seeds": []
+    },
+    {
+      "id": "s25",
+      "surface": "challenge pass / cheap-probes lens: usbdevice_fs.h, which gst-launch-1.0, gst-inspect-1.0 pipewire, ls -l /dev/bus/usb, pgrep reachy-mini-daemon, reachy_mini LICENSE",
+      "finding": "all probes were read-only; an end-to-end control-transfer probe is impossible today (no writable USB node) and is deferred to issue #3",
+      "seeds": []
+    },
+    {
+      "id": "s26",
+      "surface": "challenge pass / cheap-probes lens: live device after user connected it (lsusb, /proc/asound/cards, journalctl -k)",
+      "finding": "the user reports the Reachy is connected over USB but nothing enumerates on this host (no 38fb/2886 id, no capture card, no kernel USB event), so the read-only DoA probe could not run; the ioctl path stays parked (v5) for issue #3",
+      "seeds": []
     }
   ],
-  "lapses": [],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "assumption-for-measurement",
+      "what": "the concurrency-lens scope entry asserts device-recipient vendor control transfers need no claimed interface while snd-usb-audio is bound; that is recalled kernel behaviour (drivers/usb/core/devio.c check_ctrlrecip) plus the SDK not detaching the driver, not something read or measured in this pass",
+      "skipped_check": "",
+      "refs": [
+        "challenge pass / concurrency lens"
+      ],
+      "origin": "llm",
+      "status": "approved"
+    }
+  ],
   "obligations": []
 }
