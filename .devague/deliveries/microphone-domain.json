@@ -1,0 +1,39 @@
+{
+  "plan_slug": "microphone-domain",
+  "schema_version": 2,
+  "created": "2026-09-06T19:58:21Z",
+  "updated": "2026-09-06T20:07:24Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "Wave-4 acceptance target is a Seeed ReSpeaker XVF3800 (XIAO variant) on the dev host, id 2886:001a serial 114993702263100642, reflashed from I2S to USB firmware v2.1.0 via dfu-util, instead of the Reachy Mini Lite (38fb:1001) the plan named; the Reachy Mini's array is on its own Pi at 192.168.1.162 and was never reachable from this host",
+      "task_ref": "t13",
+      "reason": "the connected robot's USB-C is a host port (Reachy Mini, not Lite); the user chose to bring up a separate ReSpeaker board and asked for the firmware update; issue #4 tracks CLI support for the DFU path",
+      "affects": [
+        "t13"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "Seeed's USB firmware v2.1.0 on the 2886:001a board does not implement DOA_VALUE_RADIANS (resid 20 cmd 19) and its DOA_VALUE (20/18) is two uint16 values (degrees 0-359, speech flag), not two uint32; 'array doa' fails with firmware status 66 while every other probed parameter (VERSION, BLD_*, AEC_*, AUDIO_MGR_MIC_GAIN, LED/GPO) reads correctly through the stdlib usbdevfs path",
+      "task_ref": "t13",
+      "reason": "the vendored PARAMETERS table is reachy_mini's 38fb:1001 map; the spec parked this exact unknown (v4) and hardware now answers it: the map is firmware-specific. Needs a uint16 type and a per-firmware DoA source before array doa can pass acceptance on this board",
+      "affects": [
+        "t13",
+        "t7",
+        "t3"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "needs-follow-up",
+      "seq": 2
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}

@@ -1,4 +1,10 @@
-"""microphone-cli — agent-first CLI for an AgentCulture mesh agent."""
+"""microphone-cli — agent-first CLI for USB microphones and microphone arrays.
+
+Enumerate what is attached, inspect capture formats, read and set gain, reach the
+XVF3800 array firmware (direction-of-arrival, echo-canceller state, raw
+parameters), and serve or record audio. Installed as the ``microphone`` command;
+the import package is ``microphone_cli`` and the distribution is ``microphone-cli``.
+"""
 
 from __future__ import annotations
 

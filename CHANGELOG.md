@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-06
+
+### Added
+
+- **The microphone domain** — `list`, `inspect`, `gain get|set`, `array doa` (single-shot or `--watch` JSON Lines), `array aec get|set`, `param list|get|set` over the full XVF3800 table with a persistent tier behind `--allow-persistent`, `stream audio` (RTP/UDP passthrough or Opus), and `record` (bounded WAV/Matroska), built on seven zero-dependency modules: `devices` (stable ids from USB serial), `access` (ok/absent/forbidden/busy → exit 0/1/2/3), `usbctl` (stdlib `usbdevfs` control transfers), `xvf3800` (vendored parameter table, typed codec, status-64 retry), `mixer` (`amixer`), `engine` (GStreamer argv), and `activation` (append-only log of every `--apply`). Spec: `docs/specs/2026-09-06-microphone-domain.md`; plan: `docs/plans/2026-09-06-microphone-domain.md`.
+- **Per-firmware parameter overlays** (`xvf3800.FIRMWARE_OVERLAYS`, `parameters_for`, `Xvf3800(vendor=…)`, `param list --vendor`) and a `uint16` codec, because Seeed's USB firmware (`2886`) has no `DOA_VALUE_RADIANS` and its `DOA_VALUE` is two `uint16`; `array doa` now reports `azimuth_deg` alongside `azimuth_rad` and names its `source` command.
+- **docs/acceptance-microphone-domain.md** and `scripts/acceptance/` — on-device acceptance against a ReSpeaker XVF3800 (Seeed USB firmware 2.1.0): DoA matched the vendor's reference reader exactly, all volatile writes round-tripped, record and stream produced real audio.
+- **docs/xvf3800-parameters.md** — attribution and resid-group guide for the vendored XVF3800 parameter table (Pollen Robotics' reachy_mini, Apache-2.0), the persistent tier, and how the array/param/gain verbs map onto it.
+
+### Fixed
+
+- **Seven defects found only on hardware** (see the acceptance doc): the announced RTP L16 consumer hardcoded `clock-rate=48000` (now follows the negotiated rate and channel count); the udev permission hint named `38fb:1001` instead of the refused device's own ids; `list --root <fixture>` probed the host's real `/dev/snd` node; the `amixer contents` parser dropped a second same-named control's `,index=1` suffix so gain readback was stale; passthrough streaming handed `S16LE` to `rtpL16pay`, which only takes `S16BE`; fixed 48 kHz mono defaults could never open a 16 kHz stereo device — `stream audio`/`record` now default to the advertised format and report each field's source; and the parameter map was assumed identical across firmwares.
+
+### Changed
+
+- **Review round on PR #6** — ten Qodo findings fixed (startup errors are structured, byte/half-word parameter values are range-checked and short replies rejected, `gain set` validates its 0.0..1.0 domain, a recording child that ignores SIGTERM is killed before the bound is reported, an artifact that finishes on its own over `--max-bytes` is an error with the file kept, `stream audio --apply` detects a pipeline that dies at startup and quotes GStreamer's diagnostics, a live stream's audit line is open-ended, the activation log is opened before the action and completes short writes); 38 SonarCloud findings cleared by behaviour-preserving refactors (parsers split into helpers, backtracking-free regexes, handlers return `None` under the dispatch contract, a shared `JSON_FLAG_HELP`, `_payload` takes a `_Plan`); and `tests/test_repo_hygiene.py` now enforces a 1000-line ceiling on every tracked Python file.
+- **README.md and CLAUDE.md replace the scaffold-state narrative left by `5f9b1bd` ("scaffold microphone-cli from culture-agent-template")** with the domain state: `list`, `inspect`, `gain get`/`gain set`, `array doa`, `array aec get`/`array aec set`, `param list`/`param get`/`param set`, `stream audio`, and `record` now sit alongside the six agent-first verbs the scaffold shipped (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) — 13 top-level verbs, 276 tests, 92% coverage.
+- **README.md rewritten for the domain state** — Status (13 verbs landed, on-device acceptance pending issue #3), Scope (non-goals: video, remote Reachy Mini, STT/TTS, playback, DoA coordinate transforms), a full CLI verb table, What comes out (JSON/JSON Lines shapes), What touches the hardware (the three-level split, activation log, persistent tier), and Why device identity is the hard part (stable ids, udev access).
+- **CLAUDE.md rewritten from scaffold-state to domain-state** — a module map for the seven `microphone_cli/` domain modules, the three-level hardware split, the testing seams (`root=`, `_open_array`, `_ioctl`, `_spawn`, `_sleep`, `run=`), the fixture trees under `tests/fixtures/`, the parity tests that keep the catalog/learn/overview surfaces in sync with the registered parser, and the hardware-acceptance status.
+- **Console-script note resolved** — `pyproject.toml`'s `microphone` script and argparse's `prog` now agree; the CLAUDE.md note that used to flag the mismatch now records it as fixed.
+- **docs/skill-sources.md** gained rows for the `recall`/`remember` skills, which were vendored (from `eidetic-cli`, not guildmaster) but never entered into the provenance ledger.
+
 ## [0.8.2] - 2026-09-06
 
 ### Fixed

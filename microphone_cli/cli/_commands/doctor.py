@@ -1,6 +1,9 @@
-"""``microphone-cli doctor`` — check the agent-identity invariants.
+"""``microphone doctor`` — check the agent-identity invariants.
 
-Mirrors the two invariants ``steward doctor`` verifies for a mesh agent:
+An *identity* check, not a capture-readiness check: it says nothing about whether
+a microphone is attached or openable (use ``microphone list`` for that).
+
+Mirrors the two invariants ``steward doctor`` verifies:
 
 * **prompt-file-present** — the repo declares an agent in ``culture.yaml`` and
   has the matching prompt file on disk;
@@ -105,7 +108,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         emit_result(report, json_mode=True)
     else:
         status = "healthy" if report["healthy"] else "unhealthy"
-        lines = [f"microphone-cli doctor: {status}", ""]
+        lines = [f"microphone doctor: {status}", ""]
         for check in report["checks"]:
             mark = "ok" if check["passed"] else "FAIL"
             lines.append(f"[{mark}] {check['id']}: {check['message']}")

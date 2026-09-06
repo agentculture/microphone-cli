@@ -1,0 +1,19 @@
+Pollen Robotics Reachy Mini Audio at usb-NVDA8000:02-1.1, high speed : USB Audio
+
+Playback:
+  Status: Stop
+  Interface 1
+    Altset 1
+    Format: S16_LE
+    Channels: 2
+    Endpoint: 0x01 (1 OUT) (ADAPTIVE)
+    Rates: 48000
+
+Capture:
+  Status: Stop
+  Interface 2
+    Altset 1
+    Format: S32_LE
+    Channels: 6
+    Endpoint: 0x82 (2 IN) (ASYNC)
+    Rates: 48000

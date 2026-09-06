@@ -6,18 +6,105 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **microphone-cli** — an agent-first CLI for USB microphones and microphone
 arrays: enumerate devices, select and inspect channels, control gain and sample
-format, and read direction-of-arrival from array firmware.
+format, and read direction-of-arrival and echo-canceller state from
+XVF3800-class array firmware.
 
-**Current state: scaffold only.** The repo was cloned from the AgentCulture
-agent template (`5f9b1bd scaffold microphone-cli from culture-agent-template`).
-The package is renamed and the CI/identity/skills baseline is live, but **no
-microphone domain code exists yet** — the only verbs are the template's
-agent-first introspection surface (`whoami`, `learn`, `explain`, `overview`,
-`doctor`, `cli overview`). Several strings still describe the template
-("a clonable template for AgentCulture mesh agents") rather than the microphone
-domain: `microphone_cli/cli/_commands/learn.py`, `overview.py` (`_ARTIFACTS`),
-`microphone_cli/explain/catalog.py`, and `README.md`. Rewrite those as the
-domain lands.
+**Current state: the domain surface is built.** The repo started as a clone
+of the AgentCulture agent template
+(`5f9b1bd scaffold microphone-cli from culture-agent-template`), which shipped
+only the agent-first introspection surface. The microphone domain has since
+landed on top of it: 13 top-level verbs, 285 tests, 92% coverage,
+`teken cli doctor . --strict` at 26/26. The converged spec and plan it was
+built from live at `docs/specs/2026-09-06-microphone-domain.md` and
+`docs/plans/2026-09-06-microphone-domain.md`.
+
+### Module map
+
+| Module | Owns |
+|--------|------|
+| `microphone_cli/devices.py` | Device identity: `/proc/asound` + sysfs parsing, stable-id synthesis (udev-style, from USB manufacturer/product/serial), `resolve()` by selector. Never opens a device or checks permissions. Cited from `webcam_cli/devices.py` with the video half dropped. |
+| `microphone_cli/access.py` | Typed device-access state: `ok` / `absent` / `forbidden` / `busy`, for both `audio` (ALSA capture nodes) and `usb` (raw USB nodes) device kinds, each with its own remediation. Cited from `webcam-cli/webcam_cli/access.py`. |
+| `microphone_cli/usbctl.py` | Stdlib `usbdevfs` control transfers (`USBDEVFS_CONTROL` ioctl via `fcntl.ioctl`) — no `pyusb`, no `libusb`. `find_devices()`/`open_device()` plus the `_ioctl` testing seam. |
+| `microphone_cli/xvf3800.py` | The XVF3800 vendor control protocol: `PARAMETERS` (vendored verbatim from Pollen Robotics' `reachy_mini`, Apache-2.0), `PERSISTENT`, `Xvf3800` read/write. See `docs/xvf3800-parameters.md`. |
+| `microphone_cli/mixer.py` | ALSA mixer control via `amixer` subprocess calls (no `libasound` bindings) — `list_controls`/`get_gain`/`set_gain`, all taking a `run` seam. |
+| `microphone_cli/engine.py` | GStreamer boundary: capability detection and pipeline construction, shelling out to `gst-launch-1.0`/`gst-inspect-1.0`. No `gi`/PyGObject import, ever. Cited (audio subset) from `webcam-cli/webcam_cli/engine.py`. |
+| `microphone_cli/activation.py` | Append-only activation log: one JSON line per `--apply` action. Path resolution order and shape cited from `webcam-cli/webcam_cli/activation.py`. |
+
+### The three-level hardware split
+
+`array`/`param` (reads open the USB node directly — there is no cheaper probe
+stage) and `stream`/`record` (which do have a probe stage) share one rule,
+readable from the invocation alone:
+
+| Invocation | What it touches |
+|------------|------------------|
+| default (no flag) | Nothing. Resolves the device, validates the request, prints the plan. Not logged. |
+| `--probe` (`stream`/`record` only) | Detects the GStreamer engine and checks the capture node's access state, still without opening it. Not logged. |
+| `--apply` | Opens the device and acts (writes gain, flips AEC state, writes a firmware parameter, streams, or records). Logged — one JSON line appended to the activation log (`$MICROPHONE_ACTIVATION_LOG`, else `$XDG_STATE_HOME/microphone-cli/activation.jsonl`, else `~/.local/state/microphone-cli/activation.jsonl`). |
+
+`param set` on a name in `xvf3800.PERSISTENT` (`SAVE_CONFIGURATION`,
+`CLEAR_CONFIGURATION`, `REBOOT`, `TEST_CORE_BURN`,
+`TEST_AEC_DISABLE_CONTROL`, `USB_BIT_DEPTH`, every `SPECIAL_CMD_*`) needs
+`--allow-persistent` in addition to `--apply` — an ordinary `rw` write is
+volatile and reverts on power-cycle, this tier is not.
+
+### Testing seams
+
+No test ever touches real hardware. Every module that would open a device or
+spawn a process exposes a callable seam that tests monkeypatch:
+
+- `root=` (`devices.py`, `access.py`, and every command module that resolves
+  a device) — points filesystem parsing at a synthetic tree instead of `/`.
+- `_open_array` (`cli/_commands/array.py`, `cli/_commands/param.py`) —
+  resolves a device and opens an `Xvf3800`; tests replace it.
+- `_ioctl` (`usbctl.py`) — module-level callable defaulting to
+  `fcntl.ioctl`; tests replace it so no test ever touches `/dev`.
+- `_spawn` (`cli/_commands/record.py`, `cli/_commands/stream.py`) — spawns
+  the `gst-launch-1.0` subprocess.
+- `_sleep` (`cli/_commands/record.py`, and `array.py`'s DoA `--watch` poll
+  loop) — the retry/poll delay.
+- `run=` (`mixer.py`'s `RunFunc`) — defaults to `subprocess.run`; every
+  `amixer`-calling function takes it so tests inject a fake.
+
+Fixture trees live under `tests/fixtures/`: `host-baseline` (one array, one
+plain mic), `host-renumbered` (the same devices after a simulated replug —
+proves selectors survive card-index churn), `respeaker` (an older ReSpeaker
+XVF3800, `2886:001a`), and `two-arrays` (disambiguation when more than one
+`38fb:1001`/`2886:001a` device is attached).
+
+### Parity tests
+
+`tests/test_cli.py` enforces that the hand-maintained surfaces stay in sync
+with the registered parser: `test_every_catalog_path_resolves` and
+`test_every_registered_path_has_a_catalog_entry` (catalog ↔ parser, both
+directions), `test_every_registered_path_appears_in_overview_verbs`
+(`overview._VERBS` ↔ parser), and
+`test_learn_json_command_map_matches_the_registered_surface`
+(`learn._TEXT`/`_as_json_payload()` ↔ parser). Adding a verb without updating
+all four fails CI, not just the rubric gate.
+
+### Hardware acceptance
+
+Run on 2026-09-06 against a Seeed ReSpeaker XVF3800 (`2886:001a`, Seeed USB
+firmware 2.1.0) attached to the dev host; see
+`docs/acceptance-microphone-domain.md` for the evidence and the seven defects it
+surfaced. Two facts from that run shape the code:
+
+- **The parameter map is firmware-specific.** `xvf3800.PARAMETERS` is Pollen's
+  `38fb:1001` map; `xvf3800.FIRMWARE_OVERLAYS` patches it per USB vendor id
+  (`2886` = Seeed: `DOA_VALUE` is two `uint16` degrees/speech, no
+  `DOA_VALUE_RADIANS`). Always construct `Xvf3800(fd, vendor=...)` and resolve
+  parameter names *after* resolving the device.
+- **Capture format is advertised, never assumed.** `stream audio` and
+  `record` default `--rate/--channels/--format` from `stream0`
+  (`stream.advertised_format`) because the exact caps filter never falls back.
+
+Still open: the Reachy Mini Lite (`38fb:1001`) named in the plan
+([issue #3](https://github.com/agentculture/microphone-cli/issues/3)), CLI
+support for the DFU/firmware bring-up
+([issue #4](https://github.com/agentculture/microphone-cli/issues/4)), and
+voice-activity exposure
+([issue #5](https://github.com/agentculture/microphone-cli/issues/5)).
 
 ## Commands
 
@@ -53,13 +140,14 @@ markdownlint-cli2 "**/*.md" "#node_modules" "#.local" "#.claude/skills"
 Config lives in `.markdownlint-cli2.yaml` (MD013 and MD060 off, MD024
 siblings-only for the changelog; `.claude/skills/**` ignored).
 
-### Console-script name
+### Console-script name — RESOLVED
 
-`pyproject.toml` declares `microphone = "microphone_cli.cli:main"` — the binary
-is **`microphone`**, not `microphone-cli`. The argparse `prog` is
-`"microphone-cli"`, so `--help` and every doc string say `microphone-cli …`
-while the actual command is `microphone …`. Either rename the script or the
-`prog` before this ships; until then, prefer `microphone` in anything runnable.
+`pyproject.toml` declares `microphone = "microphone_cli.cli:main"` and
+argparse's `prog` is also `"microphone"` — the binary and the program name
+both agree now. `--help` output and every doc string say `microphone …`;
+nothing presents `microphone-cli <verb>` as something to type.
+`microphone-cli` still correctly names the *project*, the PyPI *distribution*,
+and the mesh *nick* — do not blanket-replace it.
 
 ## Architecture
 
@@ -115,6 +203,12 @@ guidance file. Changing `backend` means adding the matching prompt file or
 `doctor` (and CI's rubric gate) goes red.
 
 ### Adding a verb or noun
+
+The domain modules (`devices.py`, `access.py`, `usbctl.py`, `xvf3800.py`,
+`mixer.py`, `engine.py`, `activation.py`) are the domain logic; a new verb on
+an *existing* noun almost never touches them. Scope the change to
+`microphone_cli/cli/_commands/*.py` plus the three hand-maintained surfaces
+below — that is the whole checklist:
 
 1. New module in `microphone_cli/cli/_commands/` exposing `register(sub)`, with
    `--json` and a `func` default.

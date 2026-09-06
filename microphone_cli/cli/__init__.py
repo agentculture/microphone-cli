@@ -1,9 +1,20 @@
-"""Unified CLI entry point for microphone-cli.
+"""Unified CLI entry point, installed as the ``microphone`` command.
 
-The agent-first global verbs (``whoami``, ``learn``, ``explain``, ``overview``,
-``doctor``) are registered here under :mod:`microphone_cli.cli._commands`,
-alongside the ``cli`` noun group. Future noun groups register via their own
-``register()`` functions following the same pattern.
+Two families of verbs register here under :mod:`microphone_cli.cli._commands`:
+the microphone surface (``list``, ``inspect``, the ``gain``, ``array``,
+``param`` and ``stream`` noun groups, ``record``) and the agent-first
+introspection verbs (``whoami``, ``learn``, ``explain``, ``overview``,
+``doctor``) alongside the ``cli`` noun group. Further noun groups register via
+their own ``register()`` functions following the same pattern.
+
+Three names, one typable
+------------------------
+The console command is ``microphone`` (``[project.scripts]``), the import
+package is ``microphone_cli``, and the PyPI distribution is ``microphone-cli``.
+``prog`` is therefore ``microphone``: ``--help``, every argparse hint, and every
+doc string an agent reads must name something it can actually run.
+``microphone-cli`` stays correct when referring to the project, the
+distribution, or the mesh nick — it is only wrong presented as a command.
 
 Error propagation contract
 --------------------------
@@ -62,16 +73,29 @@ def _argv_has_json(argv: list[str] | None) -> bool:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    from microphone_cli.cli._commands import array as _array_group
     from microphone_cli.cli._commands import cli as _cli_group
     from microphone_cli.cli._commands import doctor as _doctor_cmd
     from microphone_cli.cli._commands import explain as _explain_cmd
+    from microphone_cli.cli._commands import gain as _gain_group
+    from microphone_cli.cli._commands import inspect as _inspect_cmd
     from microphone_cli.cli._commands import learn as _learn_cmd
+    from microphone_cli.cli._commands import list_devices as _list_cmd
     from microphone_cli.cli._commands import overview as _overview_cmd
+    from microphone_cli.cli._commands import param as _param_group
+    from microphone_cli.cli._commands import record as _record_cmd
+    from microphone_cli.cli._commands import stream as _stream_group
     from microphone_cli.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
-        prog="microphone-cli",
-        description="microphone-cli — a clonable template for AgentCulture mesh agents.",
+        prog="microphone",
+        description=(
+            "microphone — own the USB microphones and microphone arrays attached to "
+            "this host: enumerate them, inspect their formats, read and set gain, "
+            "read direction-of-arrival and firmware parameters off an array, and "
+            "serve or record audio. Dry-run by default; no verb opens a device or "
+            "writes to firmware without --probe or --apply."
+        ),
     )
     parser.add_argument(
         "--version",
@@ -82,15 +106,22 @@ def _build_parser() -> argparse.ArgumentParser:
     # through _CliArgumentParser too.
     sub = parser.add_subparsers(dest="command", parser_class=_CliArgumentParser)
 
+    # The microphone surface first: it is what this agent exists to do, so it is
+    # what `microphone --help` shows an agent before the introspection verbs.
+    _list_cmd.register(sub)
+    _inspect_cmd.register(sub)
+    _gain_group.register(sub)
+    _array_group.register(sub)
+    _param_group.register(sub)
+    _stream_group.register(sub)
+    _record_cmd.register(sub)
+
     _whoami_cmd.register(sub)
     _learn_cmd.register(sub)
     _explain_cmd.register(sub)
     _overview_cmd.register(sub)
     _doctor_cmd.register(sub)
     _cli_group.register(sub)
-    # Register your own noun groups here:
-    #   from microphone_cli.cli._commands import my_noun as _my_noun_group
-    #   _my_noun_group.register(sub)
 
     return parser
 
@@ -122,8 +153,22 @@ def _dispatch(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     # Pre-parse peek so argparse-level errors honour --json.
     _CliArgumentParser._json_hint = _argv_has_json(argv)
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+    try:
+        parser = _build_parser()
+        args = parser.parse_args(argv)
+    except (SystemExit, KeyboardInterrupt):
+        # SystemExit: argparse's own --help/--version and _CliArgumentParser.error()
+        # already emitted the right thing (or nothing, for --help). Let both pass
+        # through unchanged.
+        raise
+    except Exception as err:  # noqa: BLE001 - last-resort; wrap and route cleanly
+        wrapped = CliError(
+            code=EXIT_USER_ERROR,
+            message=f"unexpected: {err.__class__.__name__}: {err}",
+            remediation=f"file a bug at {_ISSUES_URL}",
+        )
+        emit_error(wrapped, json_mode=_CliArgumentParser._json_hint)
+        return wrapped.code
 
     if args.command is None:
         parser.print_help()
