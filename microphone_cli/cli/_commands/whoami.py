@@ -1,11 +1,12 @@
-"""``microphone-cli whoami`` — the smallest identity probe.
+"""``microphone whoami`` — the smallest identity probe.
 
 Reports the agent's identity as declared in ``culture.yaml``: its nick
 (``suffix``), the backend it runs on, and the served model (if any) — plus the
 package version. Read-only; touches nothing but its own ``culture.yaml``.
 
-When you clone this template, rename the package and update ``culture.yaml`` —
-``whoami`` then reflects your new agent's identity with no code change.
+The ``culture.yaml`` it reads is the agent's own — found by walking up from this
+module, not from the caller's working directory — so identity is this CLI's, never
+whatever repo happens to be the CWD.
 """
 
 from __future__ import annotations

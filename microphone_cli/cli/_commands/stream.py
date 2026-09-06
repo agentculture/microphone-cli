@@ -1,4 +1,4 @@
-"""``microphone-cli stream audio`` — serve a live microphone stream over RTP/UDP.
+"""``microphone stream audio`` — serve a live microphone stream over RTP/UDP.
 
 Cited (audio half only) from ``webcam-cli/webcam_cli/cli/_commands/stream.py``:
 the noun group + ``_no_verb`` overview shape (lines 1490-1672) and the
@@ -461,7 +461,7 @@ def stream_sections() -> list[dict[str, object]]:
 
 def cmd_stream_overview(args: argparse.Namespace) -> int:
     emit_overview(
-        "microphone-cli stream",
+        "microphone stream",
         stream_sections(),
         json_mode=bool(getattr(args, "json", False)),
     )

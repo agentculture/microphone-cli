@@ -137,7 +137,7 @@ def test_bare_array_prints_the_noun_overview(capsys: pytest.CaptureFixture[str])
     rc = run(["array"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "microphone-cli array" in out
+    assert "microphone array" in out
     assert "doa" in out
     assert "aec" in out
 
@@ -146,7 +146,7 @@ def test_array_overview_json_lists_sections(capsys: pytest.CaptureFixture[str]) 
     rc = run(["array", "overview", "--json"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["subject"] == "microphone-cli array"
+    assert payload["subject"] == "microphone array"
     assert [section["title"] for section in payload["sections"]]
 
 
@@ -353,7 +353,7 @@ def test_aec_overview(capsys: pytest.CaptureFixture[str]) -> None:
     rc = run(["array", "aec", "--json"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["subject"] == "microphone-cli array aec"
+    assert payload["subject"] == "microphone array aec"
 
 
 # ---------------------------------------------------------------------------
