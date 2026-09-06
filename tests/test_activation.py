@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+import microphone_cli.activation as activation_module
 from microphone_cli.activation import (
     ENV_LOG_PATH,
     Activation,
@@ -22,6 +23,7 @@ from microphone_cli.activation import (
     log_path,
     record_activation,
 )
+from microphone_cli.cli._errors import EXIT_ENV_ERROR, CliError
 
 # --- Activation dataclass ---------------------------------------------------
 
@@ -143,6 +145,52 @@ def test_record_activation_second_call_appends_not_overwrites(tmp_path: Path) ->
     assert json.loads(lines[1]) == second.to_dict()
 
 
+def test_record_activation_survives_short_writes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """os.write() may write fewer bytes than asked; the whole line must still land."""
+    log = tmp_path / "activation.jsonl"
+    act = Activation(
+        verb="gain",
+        device="usb-046d_C920_MIC_ARRAY_200901010001",
+        params={"db": 6},
+        started_at="2026-07-24T12:00:00+00:00",
+        ended_at="2026-07-24T12:00:05+00:00",
+    )
+
+    real_write = os.write
+    calls: list[int] = []
+
+    def flaky_write(fd: int, data: bytes) -> int:
+        calls.append(len(data))
+        if len(calls) == 1:
+            # Only accept the first byte on the first call.
+            return real_write(fd, data[:1])
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "write", flaky_write)
+
+    record_activation(act, path=log)
+
+    assert len(calls) > 1  # the short write actually forced a retry loop
+    lines = log.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0]) == act.to_dict()
+
+
+def test_record_activation_raises_on_zero_byte_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A write() that returns 0 (and never progresses) must raise, not spin or truncate."""
+    log = tmp_path / "activation.jsonl"
+    act = Activation(verb="gain", device="d", params={}, started_at="s", ended_at="e")
+
+    monkeypatch.setattr(os, "write", lambda fd, data: 0)
+
+    with pytest.raises(OSError):
+        record_activation(act, path=log)
+
+
 def test_record_activation_propagates_write_failures(tmp_path: Path) -> None:
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory", encoding="utf-8")
@@ -156,12 +204,16 @@ def test_record_activation_propagates_write_failures(tmp_path: Path) -> None:
 
 
 def test_activation_scope_writes_nothing_until_exit(tmp_path: Path) -> None:
+    """No *record* (JSON line) exists until exit — even though entering the scope
+    now creates/opens the (empty) log file up front, to prove audit availability
+    before the protected action runs (see the "applied but not logged" findings
+    fixed below)."""
     log = tmp_path / "activation.jsonl"
     cm = activation_scope("gain", "dev", {"db": 3}, path=log)
     act = cm.__enter__()
     try:
         assert act.ended_at is None
-        assert not log.exists()
+        assert log.read_text(encoding="utf-8") == ""
     finally:
         cm.__exit__(None, None, None)
 
@@ -233,3 +285,74 @@ def test_record_activation_uses_restrictive_file_mode(tmp_path: Path) -> None:
     record_activation(act, path=log)
     mode = os.stat(log).st_mode & 0o777
     assert mode == 0o600
+
+
+# --- activation_scope: audit availability established before the action -----
+
+
+def test_activation_scope_raises_before_body_when_log_dir_unwritable(
+    tmp_path: Path,
+) -> None:
+    if os.geteuid() == 0:
+        pytest.skip("root ignores directory permission bits")
+
+    log_dir = tmp_path / "state"
+    log_dir.mkdir()
+    log = log_dir / "activation.jsonl"
+    log_dir.chmod(0o500)  # read + execute, no write: can't create a file inside it
+
+    body_ran = False
+    try:
+        with pytest.raises(CliError) as exc_info:
+            with activation_scope("gain", "dev", {"db": 6}, path=log):
+                body_ran = True  # pragma: no cover - must never execute
+    finally:
+        log_dir.chmod(0o700)  # restore so tmp_path cleanup can remove it
+
+    assert body_ran is False
+    assert not log.exists()
+    assert exc_info.value.code == EXIT_ENV_ERROR
+    assert str(log) in exc_info.value.message
+    assert ENV_LOG_PATH in exc_info.value.remediation
+
+
+def test_activation_scope_reports_applied_but_not_logged_after_body_ran(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    log = tmp_path / "activation.jsonl"  # writable: the pre-check must pass
+
+    def failing_record_activation(activation: Activation, *, path: Path | None = None) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(activation_module, "record_activation", failing_record_activation)
+
+    body_ran = False
+    with pytest.raises(CliError) as exc_info:
+        with activation_scope("gain", "usb-dev-1", {"db": 6}, path=log):
+            body_ran = True
+
+    assert body_ran is True  # the protected action DID run before the log write failed
+    message = exc_info.value.message.lower()
+    assert exc_info.value.code == EXIT_ENV_ERROR
+    assert "applied" in message
+    assert "was applied" in message or "already ran" in message
+    assert "not" not in message.split("applied")[0]  # doesn't read as "not applied"
+
+
+def test_activation_scope_reports_applied_but_not_logged_on_late_write_failure_after_raise(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Even when the body itself raised, a subsequent log-write failure must not be silent."""
+    log = tmp_path / "activation.jsonl"
+
+    def failing_record_activation(activation: Activation, *, path: Path | None = None) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(activation_module, "record_activation", failing_record_activation)
+
+    with pytest.raises(CliError) as exc_info:
+        with activation_scope("format", "dev", {}, path=log):
+            raise RuntimeError("boom")
+
+    assert exc_info.value.code == EXIT_ENV_ERROR
+    assert "applied" in exc_info.value.message.lower()
