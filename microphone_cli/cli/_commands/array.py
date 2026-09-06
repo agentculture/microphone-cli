@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import math
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -39,12 +40,14 @@ from microphone_cli.activation import activation_scope
 from microphone_cli.cli._commands.overview import emit_overview
 from microphone_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from microphone_cli.cli._output import emit_result
-from microphone_cli.xvf3800 import Xvf3800
+from microphone_cli.xvf3800 import SEEED_VENDOR, Xvf3800
 
 _JSON_HELP = "Emit structured JSON."
 
 #: The one DoA parameter this verb reads. Raw firmware radians, never converted.
 DOA_PARAM = "DOA_VALUE_RADIANS"
+#: Seeed's USB firmware has no radians command; its DOA_VALUE is (degrees, speech).
+DOA_PARAM_DEGREES = "DOA_VALUE"
 
 #: Speech flag threshold: the firmware reports a float alongside the azimuth.
 _SPEECH_THRESHOLD = 0.5
@@ -118,7 +121,8 @@ def _open_array(
     fd = usbctl.open_device(
         matches[0]["node"], vendor=matches[0].get("vendor"), product=matches[0].get("product")
     )
-    return Xvf3800(fd, timeout_ms=timeout_ms)
+    vendor = matches[0].get("vendor") or device.usb_ids.vendor
+    return Xvf3800(fd, timeout_ms=timeout_ms, vendor=vendor)
 
 
 def _transport_error(exc: OSError, device: devices.MicrophoneDevice) -> CliError:
@@ -145,15 +149,31 @@ def _transport_error(exc: OSError, device: devices.MicrophoneDevice) -> CliError
 
 
 def _read_doa(chip: Xvf3800, device: devices.MicrophoneDevice) -> dict[str, object]:
-    """One DoA sample. ``azimuth_rad`` is the firmware's own radian value, untouched."""
-    values = chip.read(DOA_PARAM)
-    azimuth = float(values[0])
-    speech = float(values[1]) if len(values) > 1 else 0.0
+    """One DoA sample.
+
+    The azimuth is the firmware's own value: radians from ``DOA_VALUE_RADIANS``
+    on Reachy firmware, integer degrees from ``DOA_VALUE`` on Seeed firmware.
+    Both are reported (``azimuth_rad`` / ``azimuth_deg``) as a unit conversion
+    only; no coordinate transform is applied. ``source`` names the command.
+    """
+    if chip.vendor == SEEED_VENDOR:
+        values = chip.read(DOA_PARAM_DEGREES)
+        degrees = float(values[0])
+        radians = math.radians(degrees)
+        speech = float(values[1]) if len(values) > 1 else 0.0
+        source = DOA_PARAM_DEGREES
+    else:
+        values = chip.read(DOA_PARAM)
+        radians = float(values[0])
+        degrees = math.degrees(radians)
+        speech = float(values[1]) if len(values) > 1 else 0.0
+        source = DOA_PARAM
     return {
         "device": device.stable_id,
-        "azimuth_rad": azimuth,
+        "azimuth_rad": radians,
+        "azimuth_deg": degrees,
         "speech": speech >= _SPEECH_THRESHOLD,
-        "source": DOA_PARAM,
+        "source": source,
         "ts": _now(),
     }
 
@@ -161,6 +181,7 @@ def _read_doa(chip: Xvf3800, device: devices.MicrophoneDevice) -> dict[str, obje
 def _render_doa(payload: dict[str, object]) -> str:
     return (
         f"device: {payload['device']}  azimuth_rad: {payload['azimuth_rad']:.6f}  "
+        f"azimuth_deg: {payload['azimuth_deg']:.1f}  "
         f"speech: {str(payload['speech']).lower()}  source: {payload['source']}"
     )
 

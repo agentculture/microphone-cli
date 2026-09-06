@@ -247,7 +247,7 @@ def test_firmware_info(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_known_ids() -> None:
     assert xvf3800.KNOWN_IDS[("38fb", "1001")] == "Reachy Mini Audio"
-    assert xvf3800.KNOWN_IDS[("2886", "001a")] == "ReSpeaker XVF3800 (older firmware)"
+    assert xvf3800.KNOWN_IDS[("2886", "001a")] == "ReSpeaker XVF3800 (Seeed USB firmware)"
 
 
 def test_persistent_set() -> None:
@@ -303,3 +303,60 @@ def test_close_closes_owned_fd(monkeypatch: pytest.MonkeyPatch) -> None:
     dev.close()
     dev.close()
     assert closed == [11]
+
+
+# ---------------------------------------------------------------------------
+# Firmware overlays (found on hardware: Seeed USB firmware v2.1.0, 2026-09-06)
+# ---------------------------------------------------------------------------
+
+
+def test_seeed_overlay_changes_doa_and_drops_radians() -> None:
+    from microphone_cli.xvf3800 import SEEED_VENDOR, parameters_for
+
+    seeed = parameters_for(SEEED_VENDOR)
+    assert seeed["DOA_VALUE"] == (20, 18, 2, "ro", "uint16")
+    assert "DOA_VALUE_RADIANS" not in seeed
+    assert seeed["LED_RING_COLOR"] == (20, 19, 12, "rw", "uint32")
+    # The base (Reachy) table is untouched.
+    assert parameters_for(None)["DOA_VALUE"][4] == "uint32"
+    assert "DOA_VALUE_RADIANS" in parameters_for("38fb")
+
+
+def test_param_info_honours_vendor() -> None:
+    from microphone_cli.xvf3800 import SEEED_VENDOR, param_info
+
+    assert param_info("doa_value", SEEED_VENDOR).type == "uint16"
+    with pytest.raises(CliError) as exc:
+        param_info("DOA_VALUE_RADIANS", SEEED_VENDOR)
+    assert exc.value.code == EXIT_USER_ERROR
+    assert "2886" in exc.value.message
+
+
+def test_uint16_read_requests_five_bytes_and_decodes_degrees() -> None:
+    import struct
+
+    from microphone_cli.xvf3800 import SEEED_VENDOR, Xvf3800
+
+    calls: list[tuple[int, int, int, int, int | bytes]] = []
+
+    def transfer(request_type, request, value, index, data_or_length):
+        calls.append((request_type, request, value, index, data_or_length))
+        return b"\x00" + struct.pack("<HH", 133, 1)
+
+    chip = Xvf3800(transfer, vendor=SEEED_VENDOR)
+    assert chip.read("DOA_VALUE") == [133, 1]
+    assert calls == [(0xC0, 0, 0x80 | 18, 20, 5)]
+
+
+def test_uint16_write_packs_little_endian() -> None:
+    from microphone_cli.xvf3800 import FIRMWARE_OVERLAYS, Xvf3800
+
+    # No writable uint16 exists in either firmware; use a synthetic overlay entry.
+    FIRMWARE_OVERLAYS["ffff"] = {"TEST_U16": (99, 1, 2, "rw", "uint16")}
+    try:
+        sent: list[bytes] = []
+        chip = Xvf3800(lambda *a: sent.append(bytes(a[4])) or len(a[4]), vendor="ffff")
+        chip.write("TEST_U16", [1, 65535])
+        assert sent == [b"\x01\x00\xff\xff"]
+    finally:
+        del FIRMWARE_OVERLAYS["ffff"]

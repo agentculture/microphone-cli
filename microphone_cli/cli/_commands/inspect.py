@@ -146,7 +146,7 @@ def _firmware_payload(root: str, device: MicrophoneDevice) -> dict[str, object] 
         return {"error": exc.message}
 
     try:
-        with Xvf3800(fd) as dev:
+        with Xvf3800(fd, vendor=matches[0].get("vendor") or device.usb_ids.vendor) as dev:
             return dev.firmware_info()
     except CliError as exc:
         return {"error": exc.message}

@@ -533,4 +533,53 @@ def test_read_doa_helper_is_pure(firmware: FakeFirmware) -> None:
     device = devices_mod.resolve(SELECTOR, BASELINE)
     transfer: Callable[..., Any] = firmware
     payload = array_cmd._read_doa(Xvf3800(transfer), device)
-    assert set(payload) == {"device", "azimuth_rad", "speech", "source", "ts"}
+    assert set(payload) == {"device", "azimuth_rad", "azimuth_deg", "speech", "source", "ts"}
+
+
+# ---------------------------------------------------------------------------
+# Seeed firmware: DoA comes from DOA_VALUE (degrees, speech) — found on hardware
+# ---------------------------------------------------------------------------
+
+
+def test_doa_on_seeed_firmware_reads_degrees(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import math
+    import struct
+
+    from microphone_cli.xvf3800 import SEEED_VENDOR
+
+    reads: list[tuple[int, int]] = []
+
+    def transfer(request_type, request, value, index, data_or_length):
+        assert request_type & 0x80, "doa is read-only"
+        reads.append((index, value & 0x7F))
+        assert data_or_length == 5, "two uint16 plus the status byte"
+        return b"\x00" + struct.pack("<HH", 133, 1)
+
+    monkeypatch.setattr(
+        array_cmd,
+        "_open_array",
+        lambda device, root="/", timeout_ms=None: Xvf3800(transfer, vendor=SEEED_VENDOR),
+    )
+    rc = run(["array", "doa", SELECTOR, "--root", BASELINE, "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert reads == [(20, 18)]
+    assert payload["source"] == "DOA_VALUE"
+    assert payload["azimuth_deg"] == 133.0
+    assert payload["azimuth_rad"] == pytest.approx(math.radians(133))
+    assert payload["speech"] is True
+
+
+def test_doa_on_reachy_firmware_reports_degrees_too(
+    firmware: FakeFirmware, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import math
+
+    rc = run(["array", "doa", SELECTOR, "--root", BASELINE, "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["source"] == "DOA_VALUE_RADIANS"
+    assert payload["azimuth_rad"] == 1.25
+    assert payload["azimuth_deg"] == pytest.approx(math.degrees(1.25))

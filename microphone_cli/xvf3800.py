@@ -45,6 +45,10 @@ __all__ = [
     "PARAMETERS",
     "PERSISTENT",
     "KNOWN_IDS",
+    "FIRMWARE_OVERLAYS",
+    "SEEED_VENDOR",
+    "REACHY_VENDOR",
+    "parameters_for",
     "ParamInfo",
     "param_info",
     "Xvf3800",
@@ -66,8 +70,13 @@ READ_BIT = 0x80
 #: USB ids known to speak this protocol.
 KNOWN_IDS: dict[tuple[str, str], str] = {
     ("38fb", "1001"): "Reachy Mini Audio",
-    ("2886", "001a"): "ReSpeaker XVF3800 (older firmware)",
+    ("2886", "001a"): "ReSpeaker XVF3800 (Seeed USB firmware)",
 }
+
+#: USB vendor id of Seeed Studio boards running Seeed's own USB firmware.
+SEEED_VENDOR = "2886"
+#: USB vendor id of Pollen Robotics' Reachy Mini Audio firmware (the base table).
+REACHY_VENDOR = "38fb"
 
 # Testing seam: replaced in tests so the retry loop costs no wall-clock time.
 _sleep: Callable[[float], None] = time.sleep
@@ -224,6 +233,47 @@ PERSISTENT: frozenset[str] = frozenset(
 
 _FLOAT_TYPES = ("float", "radians")
 _WIDE_TYPES = ("float", "radians", "int32", "uint32")
+_HALF_TYPES = ("uint16",)
+
+# Per-firmware overlays on top of PARAMETERS, keyed by USB vendor id.
+# ``None`` removes an entry the firmware does not implement.
+#
+# Found on hardware (2026-09-06, ReSpeaker XVF3800 USB firmware v2.1.0,
+# build ``ua-io16-sqr``): Seeed's firmware has no DOA_VALUE_RADIANS, its
+# DOA_VALUE is two uint16 (degrees 0-359, speech flag) rather than two uint32,
+# and it adds LED_RING_COLOR and the AIC3104 output levels. Entries taken from
+# respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY python_control/xvf_host.py.
+FIRMWARE_OVERLAYS: dict[str, dict[str, tuple[int, int, int, str, str] | None]] = {
+    SEEED_VENDOR: {
+        "DOA_VALUE": (20, 18, 2, "ro", "uint16"),
+        "DOA_VALUE_RADIANS": None,
+        "LED_RING_COLOR": (20, 19, 12, "rw", "uint32"),
+        "AIC3104_HP_LEVEL": (48, 11, 1, "rw", "uint8"),
+        "AIC3104_LINEOUT_LEVEL": (48, 12, 1, "rw", "uint8"),
+        "GPO_PIN_PWM_DUTY": None,
+        "GPO_PIN_FLASH_MASK": None,
+        "SPECIAL_CMD_NLMODEL_START": None,
+        "SPECIAL_CMD_NLMODEL_COEFF_START_OFFSET": None,
+        "SPECIAL_CMD_PP_NLMODEL": None,
+        "SPECIAL_CMD_PP_NLMODEL_BAND": None,
+        "SPECIAL_CMD_PP_NLMODEL_NROW_NCOL": None,
+        "SPECIAL_CMD_PP_EQUALIZATION_NUM_BANDS": None,
+        "SPECIAL_CMD_EQUALIZATION_START": None,
+        "SPECIAL_CMD_EQUALIZATION_COEFF_START_OFFSET": None,
+        "SPECIAL_CMD_PP_EQUALIZATION": None,
+    }
+}
+
+
+def parameters_for(vendor: str | None) -> dict[str, tuple[int, int, int, str, str]]:
+    """The parameter table for the firmware behind USB ``vendor`` (base when unknown)."""
+    table = dict(PARAMETERS)
+    for name, row in FIRMWARE_OVERLAYS.get((vendor or "").lower(), {}).items():
+        if row is None:
+            table.pop(name, None)
+        else:
+            table[name] = row
+    return table
 
 
 @dataclass(frozen=True)
@@ -250,15 +300,19 @@ class ParamInfo:
         }
 
 
-def param_info(name: str) -> ParamInfo:
-    """Resolve a parameter name (case-insensitive) to its :class:`ParamInfo`."""
+def param_info(name: str, vendor: str | None = None) -> ParamInfo:
+    """Resolve a parameter name (case-insensitive) to its :class:`ParamInfo`.
+
+    ``vendor`` selects the firmware overlay (see :data:`FIRMWARE_OVERLAYS`).
+    """
     key = str(name).strip().upper()
     try:
-        resid, cmdid, count, access, type_ = PARAMETERS[key]
+        resid, cmdid, count, access, type_ = parameters_for(vendor)[key]
     except KeyError:
         raise CliError(
             code=EXIT_USER_ERROR,
-            message=f"unknown parameter: {name}",
+            message=f"unknown parameter: {name}"
+            + (f" (not implemented by vendor {vendor} firmware)" if vendor else ""),
             remediation=(
                 "Run `microphone param list` to see the parameter names this firmware exposes."
             ),
@@ -278,6 +332,8 @@ def _read_length(info: ParamInfo) -> int:
     """Bytes to request for a read: payload plus the leading status byte."""
     if info.type in _WIDE_TYPES:
         return info.count * 4 + 1
+    if info.type in _HALF_TYPES:
+        return info.count * 2 + 1
     return info.count + 1
 
 
@@ -290,7 +346,14 @@ class Xvf3800:
     returning ``bytes`` for IN transfers — the latter is what tests inject.
     """
 
-    def __init__(self, target: int | Callable[..., Any], timeout_ms: int | None = None) -> None:
+    def __init__(
+        self,
+        target: int | Callable[..., Any],
+        timeout_ms: int | None = None,
+        vendor: str | None = None,
+    ) -> None:
+        #: USB vendor id, selecting the firmware overlay for name resolution.
+        self.vendor = (vendor or "").lower() or None
         self._timeout_ms = DEFAULT_TIMEOUT_MS if timeout_ms is None else timeout_ms
         self._fd: int | None = None
         if callable(target):
@@ -322,7 +385,7 @@ class Xvf3800:
 
     def read(self, name: str) -> Any:
         """Read a parameter, retrying while the servicer reports status 64."""
-        info = param_info(name)
+        info = param_info(name, self.vendor)
         if info.access == "wo":
             raise CliError(
                 code=EXIT_USER_ERROR,
@@ -352,8 +415,9 @@ class Xvf3800:
                     code=EXIT_ENV_ERROR,
                     message=f"unknown status code {status} reading {info.name}",
                     remediation=(
-                        "The firmware rejected the command. Check the parameter is supported by "
-                        "this firmware version (`microphone firmware info`)."
+                        "The firmware rejected the command (status 66 usually means a length "
+                        "mismatch). Check the parameter is supported by this firmware: "
+                        "`microphone inspect <device> --json` shows its version and build."
                     ),
                 )
             if attempt < MAX_READ_ATTEMPTS - 1:
@@ -376,7 +440,7 @@ class Xvf3800:
 
     def write(self, name: str, values: Sequence[Any] | str) -> None:
         """Write a parameter. Refuses read-only names and wrong value counts."""
-        info = param_info(name)
+        info = param_info(name, self.vendor)
         if info.access == "ro":
             raise CliError(
                 code=EXIT_USER_ERROR,
@@ -417,8 +481,8 @@ def _decode(info: ParamInfo, data: bytes) -> Any:
         return body.rstrip(b"\x00").decode("utf-8", errors="ignore")
     if info.type == "uint8":
         return list(body[: info.count])
-    fmt = {"float": "f", "radians": "f", "int32": "i", "uint32": "I"}[info.type]
-    need = info.count * 4
+    fmt = {"float": "f", "radians": "f", "int32": "i", "uint32": "I", "uint16": "H"}[info.type]
+    need = info.count * (2 if info.type in _HALF_TYPES else 4)
     if len(body) < need:
         raise CliError(
             code=EXIT_ENV_ERROR,
@@ -452,6 +516,8 @@ def _encode(info: ParamInfo, values: Sequence[Any] | str) -> bytes:
             return struct.pack("<" + "f" * info.count, *(float(v) for v in values))
         if info.type == "uint8":
             return bytes(bytearray(int(v) & 0xFF for v in values))
+        if info.type in _HALF_TYPES:
+            return struct.pack("<" + "H" * info.count, *(int(v) for v in values))
         fmt = "i" if info.type == "int32" else "I"
         return struct.pack("<" + fmt * info.count, *(int(v) for v in values))
     except (TypeError, ValueError, struct.error) as exc:

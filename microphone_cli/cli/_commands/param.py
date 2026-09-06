@@ -35,7 +35,7 @@ from microphone_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
 from microphone_cli.cli._output import emit_result
 from microphone_cli.devices import MicrophoneDevice, resolve
 from microphone_cli.usbctl import find_devices, open_device
-from microphone_cli.xvf3800 import PARAMETERS, ParamInfo, Xvf3800, param_info
+from microphone_cli.xvf3800 import ParamInfo, Xvf3800, param_info, parameters_for
 
 _NUMERIC_FLOAT_TYPES = ("float", "radians")
 
@@ -121,7 +121,7 @@ def _open_array(device: MicrophoneDevice, root: str) -> Xvf3800:
     fd = open_device(
         matches[0]["node"], vendor=matches[0].get("vendor"), product=matches[0].get("product")
     )
-    return Xvf3800(fd)
+    return Xvf3800(fd, vendor=matches[0].get("vendor") or device.usb_ids.vendor)
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +172,14 @@ def _parse_values(info: ParamInfo, tokens: list[str]) -> Any:
 
 def cmd_param_list(args: argparse.Namespace) -> int:
     json_mode = bool(getattr(args, "json", False))
-    infos = sorted((param_info(name) for name in PARAMETERS), key=lambda info: info.name)
-    payload = {"params": [info.to_dict() for info in infos], "count": len(infos)}
+    vendor = getattr(args, "vendor", None)
+    table = parameters_for(vendor)
+    infos = sorted((param_info(name, vendor) for name in table), key=lambda info: info.name)
+    payload = {
+        "params": [info.to_dict() for info in infos],
+        "count": len(infos),
+        "vendor": (vendor or "").lower() or None,
+    }
     if json_mode:
         emit_result(payload, json_mode=True)
         return 0
@@ -196,7 +202,9 @@ def cmd_param_get(args: argparse.Namespace) -> int:
     json_mode = bool(getattr(args, "json", False))
     root = getattr(args, "root", "/") or "/"
 
-    info = param_info(args.name)
+    # Resolve the device first: the parameter table depends on its firmware.
+    device = _resolve_device(args.device, root)
+    info = param_info(args.name, device.usb_ids.vendor)
     if info.access == "wo":
         raise CliError(
             code=EXIT_USER_ERROR,
@@ -204,7 +212,6 @@ def cmd_param_get(args: argparse.Namespace) -> int:
             remediation="Use `microphone param set` for write-only parameters.",
         )
 
-    device = _resolve_device(args.device, root)
     with _open_array(device, root) as xvf:
         values = xvf.read(info.name)
 
@@ -227,7 +234,9 @@ def cmd_param_set(args: argparse.Namespace) -> int:
     apply = bool(getattr(args, "apply", False))
     allow_persistent = bool(getattr(args, "allow_persistent", False))
 
-    info = param_info(args.name)
+    # Resolve the device first: the parameter table depends on its firmware.
+    device = _resolve_device(args.device, root)
+    info = param_info(args.name, device.usb_ids.vendor)
     if info.access == "ro":
         raise CliError(
             code=EXIT_USER_ERROR,
@@ -235,8 +244,6 @@ def cmd_param_set(args: argparse.Namespace) -> int:
             remediation="Use `microphone param get` to read it.",
         )
     values = _parse_values(info, list(args.values))
-
-    device = _resolve_device(args.device, root)
 
     if not apply:
         payload = {
@@ -318,6 +325,14 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     lst = noun_sub.add_parser("list", help="List every XVF3800 parameter table row.")
     lst.add_argument("--json", action="store_true", help="Emit structured JSON.")
+    lst.add_argument(
+        "--vendor",
+        default=None,
+        help=(
+            "USB vendor id selecting the firmware table: 38fb (Reachy Mini Audio, the "
+            "default table) or 2886 (Seeed USB firmware)."
+        ),
+    )
     lst.set_defaults(func=cmd_param_list)
 
     get = noun_sub.add_parser("get", help="Read one parameter from a microphone array.")
