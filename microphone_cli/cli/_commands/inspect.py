@@ -43,7 +43,7 @@ _FORMAT_RE = re.compile(r"^\s*Format:\s*(?P<fmt>\S+)\s*$")
 # "    Channels: 6"
 _CHANNELS_RE = re.compile(r"^\s*Channels:\s*(?P<n>\d+)\s*$")
 # "    Rates: 16000, 48000"
-_RATES_RE = re.compile(r"^\s*Rates:\s*(?P<rates>.+)$")
+_RATES_RE = re.compile(r"^\s*Rates:\s*(?P<rates>\S.*)$")
 
 
 def _stream0_path(root: str, device: MicrophoneDevice) -> str:
@@ -56,6 +56,57 @@ def _read_text(path: str) -> str | None:
             return handle.read()
     except OSError:
         return None
+
+
+def _section_header(raw_line: str) -> str | None:
+    """The section name (``Playback``/``Capture``) if ``raw_line`` opens one."""
+    matched = _SECTION_RE.match(raw_line.strip())
+    return matched.group("section") if matched is not None else None
+
+
+def _append_format(formats: list[str], raw_line: str) -> bool:
+    matched = _FORMAT_RE.match(raw_line)
+    if matched is None:
+        return False
+    fmt = matched.group("fmt")
+    if fmt not in formats:
+        formats.append(fmt)
+    return True
+
+
+def _append_channels(channels: list[int], raw_line: str) -> bool:
+    matched = _CHANNELS_RE.match(raw_line)
+    if matched is None:
+        return False
+    channels.append(int(matched.group("n")))
+    return True
+
+
+def _append_rates(rates: list[int], raw_line: str) -> bool:
+    matched = _RATES_RE.match(raw_line)
+    if matched is None:
+        return False
+    for token in matched.group("rates").split(","):
+        token = token.strip()
+        if token.isdigit():
+            value = int(token)
+            if value not in rates:
+                rates.append(value)
+    return True
+
+
+def _parse_capture_line(
+    raw_line: str,
+    formats: list[str],
+    rates: list[int],
+    channels: list[int],
+) -> None:
+    """Try each capture-field pattern against one line of a ``Capture:`` block."""
+    if _append_format(formats, raw_line):
+        return
+    if _append_channels(channels, raw_line):
+        return
+    _append_rates(rates, raw_line)
 
 
 def _parse_capture_block(text: str) -> tuple[list[str], list[int], int | None]:
@@ -73,33 +124,13 @@ def _parse_capture_block(text: str) -> tuple[list[str], list[int], int | None]:
     section: str | None = None
 
     for raw_line in text.splitlines():
-        matched_section = _SECTION_RE.match(raw_line.strip())
-        if matched_section is not None:
-            section = matched_section.group("section")
+        header = _section_header(raw_line)
+        if header is not None:
+            section = header
             continue
         if section != "Capture":
             continue
-
-        matched_fmt = _FORMAT_RE.match(raw_line)
-        if matched_fmt is not None:
-            fmt = matched_fmt.group("fmt")
-            if fmt not in formats:
-                formats.append(fmt)
-            continue
-
-        matched_channels = _CHANNELS_RE.match(raw_line)
-        if matched_channels is not None:
-            channels.append(int(matched_channels.group("n")))
-            continue
-
-        matched_rates = _RATES_RE.match(raw_line)
-        if matched_rates is not None:
-            for token in matched_rates.group("rates").split(","):
-                token = token.strip()
-                if token.isdigit():
-                    value = int(token)
-                    if value not in rates:
-                        rates.append(value)
+        _parse_capture_line(raw_line, formats, rates, channels)
 
     return formats, sorted(rates), (max(channels) if channels else None)
 

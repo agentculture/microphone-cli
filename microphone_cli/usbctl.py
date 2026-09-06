@@ -171,6 +171,40 @@ def _read_attr(path: str) -> str | None:
         return None
 
 
+def _read_device_attrs(devdir: str) -> dict[str, str] | None:
+    """Read one sysfs device directory's identity attrs, or ``None`` if it is
+    not a device directory (an interface directory such as ``1-3:1.0`` lacks
+    ``idVendor``/``idProduct``/``busnum``/``devnum``)."""
+    vid = _read_attr(os.path.join(devdir, "idVendor"))
+    pid = _read_attr(os.path.join(devdir, "idProduct"))
+    busnum = _read_attr(os.path.join(devdir, "busnum"))
+    devnum = _read_attr(os.path.join(devdir, "devnum"))
+    if not (vid and pid and busnum and devnum):
+        return None
+    return {
+        "vendor": vid.lower(),
+        "product": pid.lower(),
+        "serial": _read_attr(os.path.join(devdir, "serial")) or "",
+        "busnum": busnum,
+        "devnum": devnum,
+    }
+
+
+def _matches_filters(
+    attrs: dict[str, str],
+    vendor: str | None,
+    product: str | None,
+    serial: str | None,
+) -> bool:
+    if vendor is not None and attrs["vendor"] != vendor.lower():
+        return False
+    if product is not None and attrs["product"] != product.lower():
+        return False
+    if serial is not None and attrs["serial"] != serial:
+        return False
+    return True
+
+
 def find_devices(
     root: str = "/",
     vendor: str | None = None,
@@ -195,34 +229,14 @@ def find_devices(
     out: list[dict[str, str]] = []
     for name in names:
         devdir = os.path.join(base, name)
-        vid = _read_attr(os.path.join(devdir, "idVendor"))
-        pid = _read_attr(os.path.join(devdir, "idProduct"))
-        busnum = _read_attr(os.path.join(devdir, "busnum"))
-        devnum = _read_attr(os.path.join(devdir, "devnum"))
-        if not (vid and pid and busnum and devnum):
-            continue
-        ser = _read_attr(os.path.join(devdir, "serial")) or ""
-        if vendor is not None and vid.lower() != vendor.lower():
-            continue
-        if product is not None and pid.lower() != product.lower():
-            continue
-        if serial is not None and ser != serial:
+        attrs = _read_device_attrs(devdir)
+        if attrs is None or not _matches_filters(attrs, vendor, product, serial):
             continue
         try:
-            node = "/dev/bus/usb/{:03d}/{:03d}".format(int(busnum), int(devnum))
+            node = "/dev/bus/usb/{:03d}/{:03d}".format(int(attrs["busnum"]), int(attrs["devnum"]))
         except ValueError:
             continue
-        out.append(
-            {
-                "node": node,
-                "vendor": vid.lower(),
-                "product": pid.lower(),
-                "serial": ser,
-                "busnum": busnum,
-                "devnum": devnum,
-                "sysfs": devdir,
-            }
-        )
+        out.append({**attrs, "node": node, "sysfs": devdir})
     return out
 
 
