@@ -34,13 +34,24 @@ uv run isort --check-only microphone_cli tests
 uv run flake8 microphone_cli tests
 uv run bandit -c pyproject.toml -r microphone_cli
 
-markdownlint-cli2 "**/*.md" "#node_modules" "#.local" "#.claude/skills"
 uv run teken cli doctor . --strict        # the agent-first rubric gate CI runs
 
 uv run microphone whoami                  # the installed console script
 uv run microphone doctor --json
 python -m microphone_cli learn
 ```
+
+**Markdown lint is not a `uv` tool** — `uv sync` does not install it, so it is
+not available on a fresh checkout. CI installs it from npm; do the same locally,
+pinning the version CI uses so results match:
+
+```bash
+npm install -g markdownlint-cli2@0.21.0
+markdownlint-cli2 "**/*.md" "#node_modules" "#.local" "#.claude/skills"
+```
+
+Config lives in `.markdownlint-cli2.yaml` (MD013 and MD060 off, MD024
+siblings-only for the changelog; `.claude/skills/**` ignored).
 
 ### Console-script name
 
@@ -127,10 +138,17 @@ SonarCloud, scan skipped when `SONAR_TOKEN` is empty, so fork PRs stay green),
 and `version-check`.
 
 **Every PR bumps the version — including docs-, config-, and CI-only PRs.**
-`version-check` compares `pyproject.toml` against `origin/main` and fails the PR
-otherwise. Use the `version-bump` skill (or edit `pyproject.toml` +
-`CHANGELOG.md` by hand, Keep-a-Changelog format). `__version__` is read from
-package metadata, so there is no second version literal to update.
+Use the `version-bump` skill (or edit `pyproject.toml` + `CHANGELOG.md` by hand,
+Keep-a-Changelog format). `__version__` is read from package metadata, so there
+is no second version literal to update.
+
+`version-check` only partly enforces that rule: it compares the PR's
+`pyproject.toml` version against `origin/main` as **strings** and fails on
+equality alone. Any different value passes, a downgrade included — `0.8.1` →
+`0.8.0` is green today. Treat the check as a "did you forget entirely?" tripwire,
+not a guarantee the version moved forward; the publish job is what actually
+breaks later. (The comparison is string-equality in every AgentCulture sibling,
+so tightening it belongs upstream, not in this repo alone.)
 
 `publish.yml` publishes to TestPyPI on same-repo PRs (`<version>.devN`) and to
 PyPI on push to main, both via Trusted Publishing.

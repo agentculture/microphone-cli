@@ -60,8 +60,18 @@ uv run flake8 microphone_cli tests
 uv run bandit -c pyproject.toml -r microphone_cli
 ```
 
-Every PR bumps the version in `pyproject.toml` and adds a `CHANGELOG.md` entry —
-CI's `version-check` job enforces it, even for docs- and CI-only changes.
+Every PR bumps the version in `pyproject.toml` and adds a `CHANGELOG.md` entry,
+even for docs- and CI-only changes. CI's `version-check` job catches a forgotten
+bump by failing when the version still matches `main`; it does not verify the
+version moved *forward*.
+
+Markdown lint is an npm tool, not a `uv` one — install it separately, pinned to
+the version CI uses:
+
+```bash
+npm install -g markdownlint-cli2@0.21.0
+markdownlint-cli2 "**/*.md" "#node_modules" "#.local" "#.claude/skills"
+```
 
 See [`CLAUDE.md`](CLAUDE.md) for the architecture, the CLI contracts (errors,
 stream split, `--json`), and how to add a verb or noun group.

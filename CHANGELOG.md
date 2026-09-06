@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-09-06
+
+### Fixed
+
+- **Documented `markdownlint-cli2` as though `uv sync` installed it** (Qodo review, PR #2) — it is an npm tool absent from the dev dependency group, so a fresh checkout following `CLAUDE.md` hit command-not-found. Both `CLAUDE.md` and `README.md` now show the `npm install -g markdownlint-cli2@0.21.0` step, pinned to the version CI installs.
+- **Overstated what CI's `version-check` job enforces** (Qodo review, PR #2) — the workflow compares the PR version against `main` as strings and fails only on equality, so a downgrade passes. The docs now describe it as a forgotten-bump tripwire rather than a guarantee the version moved forward.
+
 ## [0.8.1] - 2026-09-06
 
 ### Changed
