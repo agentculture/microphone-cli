@@ -112,7 +112,7 @@ def test_param_bare_prints_overview(
 ) -> None:
     rc = _run(monkeypatch, ["param"])
     assert rc == 0
-    assert "# microphone-cli param" in capsys.readouterr().out
+    assert "# microphone param" in capsys.readouterr().out
 
 
 def test_param_overview_json(
@@ -121,7 +121,7 @@ def test_param_overview_json(
     rc = _run(monkeypatch, ["param", "overview", "--json"])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["subject"] == "microphone-cli param"
+    assert payload["subject"] == "microphone param"
 
 
 # --- list ---------------------------------------------------------------

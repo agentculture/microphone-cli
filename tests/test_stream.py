@@ -370,7 +370,7 @@ def test_bare_noun_prints_its_overview(capsys: pytest.CaptureFixture[str]) -> No
 def test_overview_json_has_sections(capsys: pytest.CaptureFixture[str]) -> None:
     assert run(["stream", "overview", "--json"]) == 0
     data = payload(capsys)
-    assert data["subject"] == "microphone-cli stream"
+    assert data["subject"] == "microphone stream"
     assert data["sections"]
 
 

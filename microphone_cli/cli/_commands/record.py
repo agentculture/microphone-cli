@@ -1,4 +1,4 @@
-"""``microphone-cli record`` — capture a bounded audio clip to a file.
+"""``microphone record`` — capture a bounded audio clip to a file.
 
 Cited (audio half only) from ``webcam-cli/webcam_cli/cli/_commands/record.py``:
 the flag set (lines 1408-1529), the dry-run payload keys (1051-1090) — ``mode``,

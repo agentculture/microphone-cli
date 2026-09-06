@@ -1,4 +1,4 @@
-"""``microphone-cli array`` — direction-of-arrival and AEC state for an XVF3800 array.
+"""``microphone array`` — direction-of-arrival and AEC state for an XVF3800 array.
 
 Two verb families hang off this noun:
 
@@ -424,7 +424,7 @@ def _aec_sections() -> list[dict[str, object]]:
 
 def cmd_array_overview(args: argparse.Namespace) -> int:
     emit_overview(
-        "microphone-cli array",
+        "microphone array",
         _array_sections(),
         json_mode=bool(getattr(args, "json", False)),
     )
@@ -433,7 +433,7 @@ def cmd_array_overview(args: argparse.Namespace) -> int:
 
 def cmd_array_aec_overview(args: argparse.Namespace) -> int:
     emit_overview(
-        "microphone-cli array aec",
+        "microphone array aec",
         _aec_sections(),
         json_mode=bool(getattr(args, "json", False)),
     )
@@ -504,7 +504,7 @@ def register(sub: argparse._SubParsersAction) -> None:
 
     aec = noun_sub.add_parser(
         "aec",
-        help="Echo-canceller state (see 'microphone-cli array aec overview').",
+        help="Echo-canceller state (see 'microphone array aec overview').",
     )
     aec.add_argument("--json", action="store_true", help=_JSON_HELP)
     aec.set_defaults(func=cmd_array_aec_overview, json=False)

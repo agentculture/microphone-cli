@@ -1,4 +1,4 @@
-"""``microphone-cli param`` — read/write raw XVF3800 firmware parameters.
+"""``microphone param`` — read/write raw XVF3800 firmware parameters.
 
 This is the low-level noun: every verb operates directly on one row of
 :data:`microphone_cli.xvf3800.PARAMETERS`, addressed by name
@@ -76,7 +76,7 @@ def _sections() -> list[dict[str, object]]:
 
 def cmd_param_overview(args: argparse.Namespace) -> int:
     emit_overview(
-        "microphone-cli param",
+        "microphone param",
         _sections(),
         json_mode=bool(getattr(args, "json", False)),
     )
@@ -84,7 +84,7 @@ def cmd_param_overview(args: argparse.Namespace) -> int:
 
 
 def _no_verb(args: argparse.Namespace) -> int:
-    # `microphone-cli param` with no sub-verb prints the noun's overview.
+    # `microphone param` with no sub-verb prints the noun's overview.
     return cmd_param_overview(args)
 
 
