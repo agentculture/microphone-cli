@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-09-06T18:08:53Z",
-  "updated": "2026-09-06T18:38:29Z",
+  "updated": "2026-09-06T18:49:41Z",
   "claims": [
     {
       "id": "c1",
@@ -988,6 +988,39 @@
       ],
       "origin": "llm",
       "status": "approved"
+    },
+    {
+      "id": "l2",
+      "code": "assumption-for-measurement",
+      "what": "t9 engine.build_audio_record_argv bounds a recording via alsasrc num-buffers with a fixed latency-time=10000 (10 ms period) so num_buffers = duration/0.01; the task agent reports this was never verified against a real alsasrc, so the bound may be inexact on hardware",
+      "skipped_check": "",
+      "refs": [
+        "t9 microphone_cli/engine.py _bounded_source_props"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l3",
+      "code": "assumption-for-measurement",
+      "what": "t2 fixture trees reconstruct /proc/asound/cardN/stream0 and pcm*c/info layouts from the USB-audio driver's known output and webcam-cli's fixtures, not from a live Reachy Mini; _channels_from_stream may need adjusting on real hardware",
+      "skipped_check": "",
+      "refs": [
+        "t2 tests/fixtures/** + microphone_cli/devices.py _channels_from_stream"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "control-absent",
+      "what": "t2 pipewire_visible can only be True or None: enumerate_devices drops non-capture cards first and the real discriminator (udev ACP_IGNORE) is not readable from sysfs/procfs, so the field is 'nothing in procfs says otherwise', not a confirmed PipeWire node",
+      "skipped_check": "",
+      "refs": [
+        "t2 microphone_cli/devices.py _pipewire_visible"
+      ],
+      "origin": "llm",
+      "status": "proposed"
     }
   ],
   "obligations": []
