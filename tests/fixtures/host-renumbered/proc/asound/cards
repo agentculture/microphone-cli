@@ -1,0 +1,4 @@
+ 0 [NVIDIA         ]: hda-acpi - NVIDIA
+                      NVIDIA HDA Controller at 0x36078000 irq 310
+ 2 [Audio          ]: USB-Audio - Reachy Mini Audio
+                      Pollen Robotics Reachy Mini Audio at usb-NVDA8000:02-1.3, high speed
