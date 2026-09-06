@@ -49,7 +49,7 @@ class FakeIoctl:
         return xfer.wLength
 
 
-@pytest.fixture()
+@pytest.fixture
 def no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     slept: list[float] = []
     monkeypatch.setattr(xvf3800, "_sleep", slept.append)
@@ -294,7 +294,8 @@ def test_persistent_set() -> None:
     ):
         assert name in xvf3800.PERSISTENT
     specials = {n for n in xvf3800.PARAMETERS if n.startswith("SPECIAL_CMD_")}
-    assert specials and specials <= xvf3800.PERSISTENT
+    assert specials
+    assert specials <= xvf3800.PERSISTENT
     assert "AUDIO_MGR_MIC_GAIN" not in xvf3800.PERSISTENT
     assert xvf3800.PERSISTENT <= set(xvf3800.PARAMETERS)
 

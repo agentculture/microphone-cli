@@ -405,7 +405,8 @@ def test_apply_passes_the_built_argv_to_the_spawn_seam(
     monkeypatch.setattr(stream, "_sleep", lambda seconds: None)
     monkeypatch.setattr(stream, "_spawn", lambda argv, stderr=None: seen.append(list(argv)) or proc)
     assert run(base_argv("--json", "--apply")) == 0
-    assert seen and seen[0][:2] == ["gst-launch-1.0", "-e"]
+    assert seen
+    assert seen[0][:2] == ["gst-launch-1.0", "-e"]
     assert seen[0] == payload(capsys)["pipeline"]
 
 

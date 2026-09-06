@@ -379,7 +379,8 @@ def test_apply_records_until_eos_and_logs_the_activation(
     assert data["bytes_written"] == os.stat(out_path).st_size
     assert data["bytes_written"] > 0
     assert data["pipeline"][:2] == ["gst-launch-1.0", "-e"]
-    assert data["timestamps"]["started_at"] and data["timestamps"]["ended_at"]
+    assert data["timestamps"]["started_at"]
+    assert data["timestamps"]["ended_at"]
 
     # It wrote to the named path and nowhere else in the directory.
     assert sorted(os.listdir(tmp_path)) == ["activation.jsonl", "clip.mka"]
@@ -489,7 +490,8 @@ def test_an_artifact_over_the_size_cap_is_an_environment_error(
     argv = base_argv(out_path, "--apply", "--duration", "600", "--max-bytes", "100")
     assert run(argv) == 2
     err = capsys.readouterr().err
-    assert "200" in err and "100" in err
+    assert "200" in err
+    assert "100" in err
     # The oversized file is kept, not deleted: that call is the caller's.
     assert os.stat(out_path).st_size == 200
     assert out_path in err
