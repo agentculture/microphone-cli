@@ -59,7 +59,10 @@ _ATTR_RE = re.compile(r"^;\s*type=(?P<type>[^,]+),access=(?P<access>[^,]+),(?P<r
 # No trailing ``$``: ``.*`` already runs to the end of the (single) line, and
 # the anchor only gives the engine a reason to backtrack (SonarCloud S8786).
 _VALUE_LINE_RE = re.compile(r"^:\s*values=(?P<values>.*)")
-_KV_RE = re.compile(r"(\w+)=(-?\d+)")
+# Possessive ``\w++`` (Python >= 3.11): once a word run is consumed it is never
+# given back, so a long run without ``=`` cannot make ``findall`` quadratic
+# (SonarCloud S8786).
+_KV_RE = re.compile(r"(\w++)=(-?\d+)")
 
 _PREFERRED_NAME_HINTS = ("capture volume", "mic")
 
