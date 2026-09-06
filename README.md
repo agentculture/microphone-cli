@@ -11,15 +11,18 @@ firmware.
 `array doa|aec`, `param list|get|set`, `stream audio`, and `record` are
 implemented and wired into the CLI, alongside the agent-first baseline
 (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) — 13
-top-level verbs, 276 tests, 92% coverage, `teken cli doctor . --strict` at
+top-level verbs, 285 tests, 92% coverage, `teken cli doctor . --strict` at
 26/26.
 
-**On-device acceptance is pending.** No capture device is attached to the
-dev host today (`arecord -l` lists nothing, `lsusb` shows no `38fb:1001` or
-`2886:001a`), so the whole surface is built and tested hardware-free against
-synthetic `/proc`/`/sys` fixture trees. Once a Reachy Mini Lite is connected
-over USB, run the checklist in
-[issue #3](https://github.com/agentculture/microphone-cli/issues/3).
+**On-device acceptance has run** on a Seeed ReSpeaker XVF3800 (`2886:001a`,
+USB firmware 2.1.0): every verb was exercised against the real array, the
+CLI's direction-of-arrival matched Seeed's reference reader exactly, and seven
+defects found only on hardware were fixed. Evidence and findings are in
+[docs/acceptance-microphone-domain.md](docs/acceptance-microphone-domain.md).
+The Reachy Mini Lite (`38fb:1001`) named in the plan is still open in
+[issue #3](https://github.com/agentculture/microphone-cli/issues/3); the
+firmware bring-up the ReSpeaker needed is documented in
+[issue #4](https://github.com/agentculture/microphone-cli/issues/4).
 
 ## Scope
 

@@ -9,7 +9,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The microphone domain** — `list`, `inspect`, `gain get|set`, `array doa` (single-shot or `--watch` JSON Lines), `array aec get|set`, `param list|get|set` over the full XVF3800 table with a persistent tier behind `--allow-persistent`, `stream audio` (RTP/UDP passthrough or Opus), and `record` (bounded WAV/Matroska), built on seven zero-dependency modules: `devices` (stable ids from USB serial), `access` (ok/absent/forbidden/busy → exit 0/1/2/3), `usbctl` (stdlib `usbdevfs` control transfers), `xvf3800` (vendored parameter table, typed codec, status-64 retry), `mixer` (`amixer`), `engine` (GStreamer argv), and `activation` (append-only log of every `--apply`). Spec: `docs/specs/2026-09-06-microphone-domain.md`; plan: `docs/plans/2026-09-06-microphone-domain.md`.
+- **Per-firmware parameter overlays** (`xvf3800.FIRMWARE_OVERLAYS`, `parameters_for`, `Xvf3800(vendor=…)`, `param list --vendor`) and a `uint16` codec, because Seeed's USB firmware (`2886`) has no `DOA_VALUE_RADIANS` and its `DOA_VALUE` is two `uint16`; `array doa` now reports `azimuth_deg` alongside `azimuth_rad` and names its `source` command.
+- **docs/acceptance-microphone-domain.md** and `scripts/acceptance/` — on-device acceptance against a ReSpeaker XVF3800 (Seeed USB firmware 2.1.0): DoA matched the vendor's reference reader exactly, all volatile writes round-tripped, record and stream produced real audio.
 - **docs/xvf3800-parameters.md** — attribution and resid-group guide for the vendored XVF3800 parameter table (Pollen Robotics' reachy_mini, Apache-2.0), the persistent tier, and how the array/param/gain verbs map onto it.
+
+### Fixed
+
+- **Seven defects found only on hardware** (see the acceptance doc): the announced RTP L16 consumer hardcoded `clock-rate=48000` (now follows the negotiated rate and channel count); the udev permission hint named `38fb:1001` instead of the refused device's own ids; `list --root <fixture>` probed the host's real `/dev/snd` node; the `amixer contents` parser dropped a second same-named control's `,index=1` suffix so gain readback was stale; passthrough streaming handed `S16LE` to `rtpL16pay`, which only takes `S16BE`; fixed 48 kHz mono defaults could never open a 16 kHz stereo device — `stream audio`/`record` now default to the advertised format and report each field's source; and the parameter map was assumed identical across firmwares.
 
 ### Changed
 

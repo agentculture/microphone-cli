@@ -230,12 +230,20 @@ def _checked_access(node: str) -> dict[str, object]:
     }
 
 
-def _consumer(port: int, host: str) -> dict[str, str]:
-    """Ready-to-run receive pipelines, one per wire codec this verb can serve."""
+def _consumer(port: int, host: str, rate: int, channels: int) -> dict[str, str]:
+    """Ready-to-run receive pipelines for each wire codec.
+
+    RTP L16 carries the stream's own clock rate and channel count in its caps
+    (``clock-rate``/``encoding-params``), so they follow the negotiated format
+    — found on hardware: a 16 kHz stereo array announced ``clock-rate=48000``
+    and the blind consumer decoded it at the wrong speed. Opus is always
+    signalled at 48 kHz on the wire regardless of the capture rate.
+    """
     return {
         "passthrough": (
             f"gst-launch-1.0 udpsrc address={host} port={port} "
-            '"caps=application/x-rtp,media=audio,clock-rate=48000,encoding-name=L16" '
+            f'"caps=application/x-rtp,media=audio,clock-rate={rate},'
+            f'encoding-name=L16,encoding-params={channels},channels={channels}" '
             "! rtpL16depay ! audioconvert ! autoaudiosink"
         ),
         "opus": (
@@ -271,7 +279,7 @@ def _attach(request: dict[str, object]) -> dict[str, object]:
             "leaves this machine; pass --host to send them elsewhere, which is a routable "
             "address and is not authenticated by this tool"
         ),
-        "consumer": _consumer(port, host),
+        "consumer": _consumer(port, host, int(request["rate"]), int(request["channels"])),
     }
 
 

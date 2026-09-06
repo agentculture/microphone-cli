@@ -13,7 +13,7 @@ XVF3800-class array firmware.
 of the AgentCulture agent template
 (`5f9b1bd scaffold microphone-cli from culture-agent-template`), which shipped
 only the agent-first introspection surface. The microphone domain has since
-landed on top of it: 13 top-level verbs, 276 tests, 92% coverage,
+landed on top of it: 13 top-level verbs, 285 tests, 92% coverage,
 `teken cli doctor . --strict` at 26/26. The converged spec and plan it was
 built from live at `docs/specs/2026-09-06-microphone-domain.md` and
 `docs/plans/2026-09-06-microphone-domain.md`.
@@ -85,13 +85,26 @@ all four fails CI, not just the rubric gate.
 
 ### Hardware acceptance
 
-No capture device is attached to the dev host (`arecord -l` lists nothing,
-`lsusb` shows no `38fb:1001`/`2886:001a`), so every module above is exercised
-only against the fixture trees. On-device acceptance is tracked in
-[issue #3](https://github.com/agentculture/microphone-cli/issues/3) — connect
-a Reachy Mini Lite over USB and run its checklist before treating the array
-verbs (`array`, `param`, and `gain`'s firmware target) as validated on real
-hardware.
+Run on 2026-09-06 against a Seeed ReSpeaker XVF3800 (`2886:001a`, Seeed USB
+firmware 2.1.0) attached to the dev host; see
+`docs/acceptance-microphone-domain.md` for the evidence and the seven defects it
+surfaced. Two facts from that run shape the code:
+
+- **The parameter map is firmware-specific.** `xvf3800.PARAMETERS` is Pollen's
+  `38fb:1001` map; `xvf3800.FIRMWARE_OVERLAYS` patches it per USB vendor id
+  (`2886` = Seeed: `DOA_VALUE` is two `uint16` degrees/speech, no
+  `DOA_VALUE_RADIANS`). Always construct `Xvf3800(fd, vendor=...)` and resolve
+  parameter names *after* resolving the device.
+- **Capture format is advertised, never assumed.** `stream audio` and
+  `record` default `--rate/--channels/--format` from `stream0`
+  (`stream.advertised_format`) because the exact caps filter never falls back.
+
+Still open: the Reachy Mini Lite (`38fb:1001`) named in the plan
+([issue #3](https://github.com/agentculture/microphone-cli/issues/3)), CLI
+support for the DFU/firmware bring-up
+([issue #4](https://github.com/agentculture/microphone-cli/issues/4)), and
+voice-activity exposure
+([issue #5](https://github.com/agentculture/microphone-cli/issues/5)).
 
 ## Commands
 

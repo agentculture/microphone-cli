@@ -404,3 +404,15 @@ def test_register_is_argparse_shaped() -> None:
     sub = parser.add_subparsers(dest="command", parser_class=_CliArgumentParser)
     stream.register(sub)
     assert isinstance(sub, argparse._SubParsersAction)
+
+
+def test_passthrough_consumer_caps_follow_the_negotiated_format(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Found on hardware: the announced L16 consumer said clock-rate=48000 for a
+    # 16 kHz stereo stream and decoded at the wrong speed.
+    assert run(base_argv("--json", "--rate", "16000", "--channels", "2")) == 0
+    consumer = payload(capsys)["attach"]["consumer"]
+    assert "clock-rate=16000" in consumer["passthrough"]
+    assert "encoding-params=2" in consumer["passthrough"]
+    assert "clock-rate=48000" in consumer["opus"]

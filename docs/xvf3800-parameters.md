@@ -65,3 +65,22 @@ in addition to `--apply` — the two flags are deliberately separate so that
 "I want to write this parameter" and "I understand this survives a
 power-cycle or is destructive" are two distinct, explicit opt-ins. Every
 other `rw` parameter needs only `--apply`.
+
+## Firmware overlays
+
+The table above is Pollen Robotics' `38fb:1001` map. Seeed's own USB firmware
+(`2886:001a`, v2.1.0 at the time of writing) differs, and the CLI patches the
+base table per USB vendor id in `xvf3800.FIRMWARE_OVERLAYS`:
+
+| Name | Reachy (`38fb`) | Seeed (`2886`) |
+|------|-----------------|----------------|
+| `DOA_VALUE` | 20/18, 2 × `uint32` | 20/18, 2 × `uint16` (degrees 0–359, speech flag) |
+| `DOA_VALUE_RADIANS` | 20/19, 2 × radians | not implemented |
+| `LED_RING_COLOR` | — | 20/19, 12 × `uint32` |
+| `AIC3104_HP_LEVEL`, `AIC3104_LINEOUT_LEVEL` | — | 48/11, 48/12, `uint8` |
+| `GPO_PIN_PWM_DUTY`, `GPO_PIN_FLASH_MASK`, `SPECIAL_CMD_*` (NL model, equalisation) | present | not implemented |
+
+`microphone param list --vendor 2886` prints the Seeed view. Source:
+`python_control/xvf_host.py` in
+[respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY](https://github.com/respeaker/reSpeaker_XVF3800_USB_4MIC_ARRAY).
+Verified on hardware on 2026-09-06 (`docs/acceptance-microphone-domain.md`).
