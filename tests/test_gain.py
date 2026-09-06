@@ -144,7 +144,7 @@ def array_device(card_index: int = 2) -> MicrophoneDevice:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_run(monkeypatch: pytest.MonkeyPatch) -> FakeAmixerRun:
     run = FakeAmixerRun()
     monkeypatch.setattr(subprocess, "run", run)

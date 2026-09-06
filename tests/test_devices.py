@@ -157,8 +157,9 @@ def test_resolve_by_label_is_unambiguous_on_a_single_device_host() -> None:
 
 
 def test_resolve_ambiguous_label_lists_every_candidate() -> None:
+    root = tree("two-arrays")
     with pytest.raises(CliError) as excinfo:
-        resolve("Reachy Mini Audio", root=tree("two-arrays"))
+        resolve("Reachy Mini Audio", root=root)
     error = excinfo.value
     assert error.code == EXIT_USER_ERROR
     assert "usb-Pollen_Robotics_Reachy_Mini_Audio_RM0001" in error.message
@@ -167,21 +168,24 @@ def test_resolve_ambiguous_label_lists_every_candidate() -> None:
 
 
 def test_resolve_unknown_selector_is_a_user_error() -> None:
+    root = tree("two-arrays")
     with pytest.raises(CliError) as excinfo:
-        resolve("no-such-microphone", root=tree("two-arrays"))
+        resolve("no-such-microphone", root=root)
     assert excinfo.value.code == EXIT_USER_ERROR
 
 
 def test_resolve_empty_selector_is_a_user_error() -> None:
+    root = tree("two-arrays")
     with pytest.raises(CliError) as excinfo:
-        resolve("   ", root=tree("two-arrays"))
+        resolve("   ", root=root)
     assert excinfo.value.code == EXIT_USER_ERROR
 
 
 @pytest.mark.parametrize("selector", ["hw:1", "hw:0,0", "1", "0", "plughw:1"])
 def test_resolve_refuses_raw_card_number_selectors(selector: str) -> None:
+    root = tree("two-arrays")
     with pytest.raises(CliError) as excinfo:
-        resolve(selector, root=tree("two-arrays"))
+        resolve(selector, root=root)
     error = excinfo.value
     assert error.code == EXIT_USER_ERROR
     assert "stable" in error.message.lower() or "stable" in error.remediation.lower()
@@ -189,8 +193,9 @@ def test_resolve_refuses_raw_card_number_selectors(selector: str) -> None:
 
 
 def test_refusal_names_the_owning_device_when_the_card_number_exists() -> None:
+    root = tree("two-arrays")
     with pytest.raises(CliError) as excinfo:
-        resolve("hw:1", root=tree("two-arrays"))
+        resolve("hw:1", root=root)
     assert "usb-Pollen_Robotics_Reachy_Mini_Audio_RM0002" in excinfo.value.remediation
 
 

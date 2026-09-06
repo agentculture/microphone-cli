@@ -49,7 +49,7 @@ class FakeIoctl:
         return xfer.wLength
 
 
-@pytest.fixture()
+@pytest.fixture
 def fake_ioctl(monkeypatch: pytest.MonkeyPatch) -> FakeIoctl:
     fake = FakeIoctl()
     monkeypatch.setattr(usbctl, "_ioctl", fake)

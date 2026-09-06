@@ -245,8 +245,9 @@ def test_activation_scope_writes_one_line_on_success(tmp_path: Path) -> None:
 
 def test_activation_scope_records_on_raise(tmp_path: Path) -> None:
     log = tmp_path / "activation.jsonl"
+    scope = activation_scope("format", "dev", {}, path=log)
     with pytest.raises(RuntimeError):
-        with activation_scope("format", "dev", {}, path=log):
+        with scope:
             raise RuntimeError("boom")
 
     lines = log.read_text(encoding="utf-8").splitlines()
@@ -258,8 +259,9 @@ def test_activation_scope_records_on_raise(tmp_path: Path) -> None:
 
 def test_activation_scope_does_not_overwrite_existing_error_key(tmp_path: Path) -> None:
     log = tmp_path / "activation.jsonl"
+    scope = activation_scope("format", "dev", {"error": "pre-existing"}, path=log)
     with pytest.raises(RuntimeError):
-        with activation_scope("format", "dev", {"error": "pre-existing"}, path=log):
+        with scope:
             raise RuntimeError("boom")
 
     record = json.loads(log.read_text(encoding="utf-8").splitlines()[0])
@@ -350,8 +352,9 @@ def test_activation_scope_reports_applied_but_not_logged_on_late_write_failure_a
 
     monkeypatch.setattr(activation_module, "record_activation", failing_record_activation)
 
+    scope = activation_scope("format", "dev", {}, path=log)
     with pytest.raises(CliError) as exc_info:
-        with activation_scope("format", "dev", {}, path=log):
+        with scope:
             raise RuntimeError("boom")
 
     assert exc_info.value.code == EXIT_ENV_ERROR

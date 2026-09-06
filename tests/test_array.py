@@ -109,7 +109,7 @@ class FakeFirmware:
         return len(bytes(data_or_length))
 
 
-@pytest.fixture()
+@pytest.fixture
 def firmware(monkeypatch: pytest.MonkeyPatch) -> FakeFirmware:
     fake = FakeFirmware()
     opened: list[Any] = []

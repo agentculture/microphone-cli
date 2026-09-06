@@ -271,28 +271,25 @@ def test_build_audio_stream_argv_contains_queue_element():
 
 
 def test_build_audio_stream_argv_rejects_unsupported_encode():
+    fmt = engine.AudioFormat(rate=48000, channels=2)
     with pytest.raises(CliError) as excinfo:
-        engine.build_audio_stream_argv(
-            "hw:CARD=Mic,DEV=0", engine.AudioFormat(rate=48000, channels=2), 5004, encode="mp3"
-        )
+        engine.build_audio_stream_argv("hw:CARD=Mic,DEV=0", fmt, 5004, encode="mp3")
 
     assert excinfo.value.code == 1
 
 
 def test_build_audio_stream_argv_rejects_invalid_format():
+    fmt = engine.AudioFormat(rate=0, channels=2)
     with pytest.raises(CliError) as excinfo:
-        engine.build_audio_stream_argv(
-            "hw:CARD=Mic,DEV=0", engine.AudioFormat(rate=0, channels=2), 5004
-        )
+        engine.build_audio_stream_argv("hw:CARD=Mic,DEV=0", fmt, 5004)
 
     assert excinfo.value.code == 1
 
 
 def test_build_audio_stream_argv_rejects_invalid_port():
+    fmt = engine.AudioFormat(rate=48000, channels=2)
     with pytest.raises(CliError) as excinfo:
-        engine.build_audio_stream_argv(
-            "hw:CARD=Mic,DEV=0", engine.AudioFormat(rate=48000, channels=2), 70000
-        )
+        engine.build_audio_stream_argv("hw:CARD=Mic,DEV=0", fmt, 70000)
 
     assert excinfo.value.code == 1
 
@@ -405,35 +402,24 @@ def test_build_audio_record_argv_contains_queue_element():
 
 
 def test_build_audio_record_argv_rejects_unsupported_container():
+    fmt = engine.AudioFormat(rate=48000, channels=2)
     with pytest.raises(CliError) as excinfo:
-        engine.build_audio_record_argv(
-            "hw:CARD=Mic,DEV=0",
-            engine.AudioFormat(rate=48000, channels=2),
-            "/tmp/out.ogg",
-            container="ogg",
-        )
+        engine.build_audio_record_argv("hw:CARD=Mic,DEV=0", fmt, "/tmp/out.ogg", container="ogg")
 
     assert excinfo.value.code == 1
 
 
 def test_build_audio_record_argv_rejects_non_positive_duration():
+    fmt = engine.AudioFormat(rate=48000, channels=2)
     with pytest.raises(CliError) as excinfo:
-        engine.build_audio_record_argv(
-            "hw:CARD=Mic,DEV=0",
-            engine.AudioFormat(rate=48000, channels=2),
-            "/tmp/out.wav",
-            duration_s=0,
-        )
+        engine.build_audio_record_argv("hw:CARD=Mic,DEV=0", fmt, "/tmp/out.wav", duration_s=0)
 
     assert excinfo.value.code == 1
 
 
 def test_build_audio_record_argv_rejects_invalid_format():
+    fmt = engine.AudioFormat(rate=48000, channels=0)
     with pytest.raises(CliError) as excinfo:
-        engine.build_audio_record_argv(
-            "hw:CARD=Mic,DEV=0",
-            engine.AudioFormat(rate=48000, channels=0),
-            "/tmp/out.wav",
-        )
+        engine.build_audio_record_argv("hw:CARD=Mic,DEV=0", fmt, "/tmp/out.wav")
 
     assert excinfo.value.code == 1
