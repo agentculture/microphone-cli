@@ -53,6 +53,61 @@ DEFAULT_RATE = 48000
 DEFAULT_CHANNELS = 1
 DEFAULT_SAMPLE_FORMAT = "S16LE"
 
+# ALSA spelling (as /proc/asound/cardN/stream0 prints it) -> GStreamer spelling.
+_ALSA_TO_GST_FORMAT = {
+    "S16_LE": "S16LE",
+    "S16_BE": "S16BE",
+    "S24_LE": "S24LE",
+    "S24_3LE": "S24LE",
+    "S32_LE": "S32LE",
+    "U8": "U8",
+    "FLOAT_LE": "F32LE",
+}
+
+
+def advertised_format(
+    root: str,
+    device: devices.MicrophoneDevice,
+    *,
+    rate: int | None,
+    channels: int | None,
+    sample_format: str | None,
+) -> tuple[engine.AudioFormat, dict[str, str]]:
+    """Fill unset request fields from what the device advertises in ``stream0``.
+
+    Found on hardware: a fixed 48 kHz mono default cannot open a device that
+    only offers 16 kHz stereo, and an exact caps filter never falls back. Each
+    field records where its value came from (``explicit`` / ``advertised`` /
+    ``default``) so the payload says what was assumed.
+    """
+    from microphone_cli.cli._commands.inspect import _formats_rates_channels
+
+    formats, rates, adv_channels = _formats_rates_channels(root, device)
+    source: dict[str, str] = {}
+
+    if rate is None:
+        rate, source["rate"] = (rates[0], "advertised") if rates else (DEFAULT_RATE, "default")
+    else:
+        source["rate"] = "explicit"
+    if channels is None:
+        if adv_channels:
+            channels, source["channels"] = adv_channels, "advertised"
+        else:
+            channels, source["channels"] = DEFAULT_CHANNELS, "default"
+    else:
+        source["channels"] = "explicit"
+    if sample_format is None:
+        gst = _ALSA_TO_GST_FORMAT.get(formats[0]) if formats else None
+        if gst:
+            sample_format, source["sample_format"] = gst, "advertised"
+        else:
+            sample_format, source["sample_format"] = DEFAULT_SAMPLE_FORMAT, "default"
+    else:
+        source["sample_format"] = "explicit"
+
+    return engine.AudioFormat(rate=rate, channels=channels, sample_format=sample_format), source
+
+
 _JSON_HELP = "Emit structured JSON."
 
 #: Every key :func:`_payload` emits. Exported so a test (and a reader) can
@@ -317,7 +372,7 @@ def _required_elements(encode: str) -> list[str]:
     """The optional elements the built argv will actually name, per encode choice."""
     if encode == "opus":
         return ["audioconvert", "audioresample", "opusenc", "rtpopuspay", "udpsink"]
-    return ["rtpL16pay", "udpsink"]
+    return ["audioconvert", "rtpL16pay", "udpsink"]
 
 
 def cmd_stream_audio(args: argparse.Namespace) -> int:
@@ -327,11 +382,14 @@ def cmd_stream_audio(args: argparse.Namespace) -> int:
     device = devices.resolve(args.device, root=root)
     node = capture_node_path(device, root=root)
 
-    fmt = engine.AudioFormat(rate=args.rate, channels=args.channels, sample_format=args.format)
+    fmt, fmt_source = advertised_format(
+        root, device, rate=args.rate, channels=args.channels, sample_format=args.format
+    )
     request: dict[str, object] = {
-        "rate": args.rate,
-        "channels": args.channels,
-        "sample_format": args.format,
+        "rate": fmt.rate,
+        "channels": fmt.channels,
+        "sample_format": fmt.sample_format,
+        "format_source": fmt_source,
         "encode": args.encode,
         "host": args.host,
         "port": args.port,
@@ -561,22 +619,28 @@ def register(sub: argparse._SubParsersAction) -> None:
     audio.add_argument(
         "--rate",
         type=_positive_int,
-        default=DEFAULT_RATE,
+        default=None,
         metavar="HZ",
-        help=f"Sample rate (default {DEFAULT_RATE}). Applied as an exact caps filter.",
+        help=(
+            "Sample rate. Default: the first rate the device advertises in "
+            f"/proc/asound (else {DEFAULT_RATE}). Applied as an exact caps filter."
+        ),
     )
     audio.add_argument(
         "--channels",
         type=_positive_int,
-        default=DEFAULT_CHANNELS,
+        default=None,
         metavar="N",
-        help=f"Channel count (default {DEFAULT_CHANNELS}).",
+        help=f"Channel count. Default: the device's advertised count (else {DEFAULT_CHANNELS}).",
     )
     audio.add_argument(
         "--format",
-        default=DEFAULT_SAMPLE_FORMAT,
+        default=None,
         metavar="FMT",
-        help=f"Sample format, GStreamer spelling (default {DEFAULT_SAMPLE_FORMAT}).",
+        help=(
+            "Sample format, GStreamer spelling. Default: the device's advertised format "
+            f"(else {DEFAULT_SAMPLE_FORMAT})."
+        ),
     )
     audio.add_argument(
         "--encode",

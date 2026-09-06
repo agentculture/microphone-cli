@@ -316,9 +316,9 @@ def build_audio_stream_argv(
     depayloader can close out cleanly and one it can't.
 
     Args:
-        encode: ``"passthrough"`` pays raw PCM directly as RTP (``rtpL16pay``
-            — no ``audioconvert``/``audioresample``/encoder needed beyond
-            what feeds the payloader, since RTP L16 carries linear PCM as-is).
+        encode: ``"passthrough"`` pays linear PCM as RTP L16 (``audioconvert``
+            to the big-endian ``S16BE`` the payloader requires, then
+            ``rtpL16pay``; no resampling or lossy encoder).
             ``"opus"`` re-encodes through ``audioconvert ! audioresample !
             opusenc`` before ``rtpopuspay``, trading CPU for bandwidth.
             Any other value is a typed user error.
@@ -339,7 +339,10 @@ def build_audio_stream_argv(
     ]
 
     if encode == "passthrough":
-        argv += ["rtpL16pay", "!"]
+        # RTP L16 is network byte order: rtpL16pay only accepts S16BE, so a
+        # little-endian capture must pass through audioconvert first (found on
+        # hardware: "could not link queue0 to rtpl16pay0" with S16LE).
+        argv += ["audioconvert", "!", "audio/x-raw,format=S16BE", "!", "rtpL16pay", "!"]
     elif encode == "opus":
         argv += [
             "audioconvert",

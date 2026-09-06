@@ -38,6 +38,7 @@ from microphone_cli.cli._commands.stream import (
     DEFAULT_CHANNELS,
     DEFAULT_RATE,
     DEFAULT_SAMPLE_FORMAT,
+    advertised_format,
     capture_node_path,
 )
 from microphone_cli.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, CliError
@@ -251,6 +252,7 @@ def _payload(
     node: str,
     container: str,
     fmt: engine.AudioFormat,
+    fmt_source: dict[str, str] | None = None,
     duration_s: float,
     max_bytes: int,
     output_path: str,
@@ -278,6 +280,7 @@ def _payload(
                 "rate": fmt.rate,
                 "channels": fmt.channels,
                 "sample_format": fmt.sample_format,
+                "source": fmt_source or {},
             },
             "planned": {
                 "rate": fmt.rate,
@@ -450,7 +453,9 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     device = devices.resolve(args.device, root=root)
     node = capture_node_path(device, root=root)
-    fmt = engine.AudioFormat(rate=args.rate, channels=args.channels, sample_format=args.format)
+    fmt, fmt_source = advertised_format(
+        root, device, rate=args.rate, channels=args.channels, sample_format=args.format
+    )
     argv = engine.build_audio_record_argv(
         device.alsa_address, fmt, output_path, container=container, duration_s=duration_s
     )
@@ -472,6 +477,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         node=node,
         container=container,
         fmt=fmt,
+        fmt_source=fmt_source,
         duration_s=duration_s,
         max_bytes=max_bytes,
         output_path=output_path,
@@ -591,22 +597,28 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--rate",
         type=_positive_int,
-        default=DEFAULT_RATE,
+        default=None,
         metavar="HZ",
-        help=f"Sample rate (default {DEFAULT_RATE}). Applied as an exact caps filter.",
+        help=(
+            "Sample rate. Default: the first rate the device advertises in "
+            f"/proc/asound (else {DEFAULT_RATE}). Applied as an exact caps filter."
+        ),
     )
     p.add_argument(
         "--channels",
         type=_positive_int,
-        default=DEFAULT_CHANNELS,
+        default=None,
         metavar="N",
-        help=f"Channel count (default {DEFAULT_CHANNELS}).",
+        help=f"Channel count. Default: the device's advertised count (else {DEFAULT_CHANNELS}).",
     )
     p.add_argument(
         "--format",
-        default=DEFAULT_SAMPLE_FORMAT,
+        default=None,
         metavar="FMT",
-        help=f"Sample format, GStreamer spelling (default {DEFAULT_SAMPLE_FORMAT}).",
+        help=(
+            "Sample format, GStreamer spelling. Default: the device's advertised format "
+            f"(else {DEFAULT_SAMPLE_FORMAT})."
+        ),
     )
     p.add_argument(
         "--overwrite",

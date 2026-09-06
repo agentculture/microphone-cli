@@ -426,3 +426,37 @@ def test_bare_gain_prints_overview(capsys: pytest.CaptureFixture[str]) -> None:
     rc = run_gain([])
     assert rc == 0
     assert "microphone gain" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# Two same-named controls (found on hardware: XVF3800 'Headset Capture Volume'
+# appears twice, the second with ",index=1"). The parser must keep them apart.
+# ---------------------------------------------------------------------------
+
+_TWO_CONTROLS = """numid=10,iface=MIXER,name='Headset Capture Volume'
+  ; type=INTEGER,access=rw---R--,values=2,min=0,max=60,step=0
+  : values=30,30
+  | dBminmax-min=-60.00dB,max=0.00dB
+numid=11,iface=MIXER,name='Headset Capture Volume',index=1
+  ; type=INTEGER,access=rw---R--,values=1,min=0,max=60,step=0
+  : values=60
+"""
+
+
+def test_list_controls_keeps_indexed_duplicate_apart() -> None:
+    from microphone_cli import mixer
+
+    def run(argv, **_kw):  # noqa: ANN001
+        class R:
+            returncode = 0
+            stdout = _TWO_CONTROLS
+            stderr = ""
+
+        return R()
+
+    controls = mixer.list_controls(1, run=run)
+    by_numid = {c.numid: c for c in controls}
+    assert set(by_numid) == {10, 11}
+    assert by_numid[10].values == (30, 30)
+    assert by_numid[11].values == (60,)
+    assert mixer.find_capture_volume(controls).numid == 10

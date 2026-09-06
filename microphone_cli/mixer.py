@@ -45,7 +45,13 @@ _AMIXER_MISSING_HINT = (
 )
 
 # "numid=3,iface=MIXER,name='Mic Capture Volume'"
-_NUMID_RE = re.compile(r"^numid=(?P<numid>\d+),iface=(?P<iface>[^,]+),name='(?P<name>.*)'$")
+# A second control with the same name carries a trailing ",index=1" (found on
+# hardware: the XVF3800 exposes two 'Headset Capture Volume' controls). Without
+# the optional suffix the second block's value lines were attributed to the
+# first control, so set_gain's readback reported the wrong control's value.
+_NUMID_RE = re.compile(
+    r"^numid=(?P<numid>\d+),iface=(?P<iface>[^,]+),name='(?P<name>.*?)'(?:,index=(?P<index>\d+))?$"
+)
 # "; type=INTEGER,access=rw---R--,values=1,min=0,max=30,step=0"
 _ATTR_RE = re.compile(r"^;\s*type=(?P<type>[^,]+),access=(?P<access>[^,]+),(?P<rest>.*)$")
 # ": values=20" or ": values=20,20"

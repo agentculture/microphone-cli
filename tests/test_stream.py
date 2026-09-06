@@ -150,13 +150,38 @@ def test_dry_run_payload_carries_every_documented_key(
 def test_dry_run_request_and_defaults(capsys: pytest.CaptureFixture[str]) -> None:
     assert run(base_argv("--json")) == 0
     request = payload(capsys)["request"]
+    # No --rate/--channels/--format given: the request is filled from what the
+    # fixture device advertises in stream0 (found on hardware: a fixed 48 kHz
+    # mono default could not open a 16 kHz stereo array).
     assert request == {
         "rate": 48000,
-        "channels": 1,
-        "sample_format": "S16LE",
+        "channels": 6,
+        "sample_format": "S32LE",
+        "format_source": {
+            "rate": "advertised",
+            "channels": "advertised",
+            "sample_format": "advertised",
+        },
         "encode": "passthrough",
         "host": "127.0.0.1",
         "port": 5000,
+    }
+
+
+def test_explicit_format_flags_override_the_advertised_ones(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert run(base_argv("--json", "--rate", "16000", "--channels", "1")) == 0
+    request = payload(capsys)["request"]
+    assert (request["rate"], request["channels"], request["sample_format"]) == (
+        16000,
+        1,
+        "S32LE",
+    )
+    assert request["format_source"] == {
+        "rate": "explicit",
+        "channels": "explicit",
+        "sample_format": "advertised",
     }
 
 
