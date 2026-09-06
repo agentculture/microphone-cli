@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-06
+
+### Added
+
+- **docs/xvf3800-parameters.md** — attribution and resid-group guide for the vendored XVF3800 parameter table (Pollen Robotics' reachy_mini, Apache-2.0), the persistent tier, and how the array/param/gain verbs map onto it.
+
+### Changed
+
+- **README.md and CLAUDE.md replace the scaffold-state narrative left by `5f9b1bd` ("scaffold microphone-cli from culture-agent-template")** with the domain state: `list`, `inspect`, `gain get`/`gain set`, `array doa`, `array aec get`/`array aec set`, `param list`/`param get`/`param set`, `stream audio`, and `record` now sit alongside the six agent-first verbs the scaffold shipped (`whoami`, `learn`, `explain`, `overview`, `doctor`, `cli overview`) — 13 top-level verbs, 276 tests, 92% coverage.
+- **README.md rewritten for the domain state** — Status (13 verbs landed, on-device acceptance pending issue #3), Scope (non-goals: video, remote Reachy Mini, STT/TTS, playback, DoA coordinate transforms), a full CLI verb table, What comes out (JSON/JSON Lines shapes), What touches the hardware (the three-level split, activation log, persistent tier), and Why device identity is the hard part (stable ids, udev access).
+- **CLAUDE.md rewritten from scaffold-state to domain-state** — a module map for the seven `microphone_cli/` domain modules, the three-level hardware split, the testing seams (`root=`, `_open_array`, `_ioctl`, `_spawn`, `_sleep`, `run=`), the fixture trees under `tests/fixtures/`, the parity tests that keep the catalog/learn/overview surfaces in sync with the registered parser, and the hardware-acceptance status.
+- **Console-script note resolved** — `pyproject.toml`'s `microphone` script and argparse's `prog` now agree; the CLAUDE.md note that used to flag the mismatch now records it as fixed.
+- **docs/skill-sources.md** gained rows for the `recall`/`remember` skills, which were vendored (from `eidetic-cli`, not guildmaster) but never entered into the provenance ledger.
+
 ## [0.8.2] - 2026-09-06
 
 ### Fixed
