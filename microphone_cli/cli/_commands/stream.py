@@ -51,6 +51,7 @@ import time
 from datetime import datetime, timezone
 
 from microphone_cli import access, activation, devices, engine
+from microphone_cli.cli._commands import JSON_FLAG_HELP
 from microphone_cli.cli._commands.overview import emit_overview
 from microphone_cli.cli._errors import EXIT_ENV_ERROR, CliError
 from microphone_cli.cli._output import emit_result
@@ -82,6 +83,34 @@ _ALSA_TO_GST_FORMAT = {
 }
 
 
+def _resolved_rate(rate: int | None, advertised: list[int]) -> tuple[int, str]:
+    """``(rate, source)`` — an explicit value wins, else the first advertised one."""
+    if rate is not None:
+        return rate, "explicit"
+    if advertised:
+        return advertised[0], "advertised"
+    return DEFAULT_RATE, "default"
+
+
+def _resolved_channels(channels: int | None, advertised: int | None) -> tuple[int, str]:
+    """``(channels, source)`` — an explicit value wins, else what the device says."""
+    if channels is not None:
+        return channels, "explicit"
+    if advertised:
+        return advertised, "advertised"
+    return DEFAULT_CHANNELS, "default"
+
+
+def _resolved_sample_format(sample_format: str | None, advertised: list[str]) -> tuple[str, str]:
+    """``(sample_format, source)`` — GStreamer spelling of the first known ALSA format."""
+    if sample_format is not None:
+        return sample_format, "explicit"
+    gst = _ALSA_TO_GST_FORMAT.get(advertised[0]) if advertised else None
+    if gst:
+        return gst, "advertised"
+    return DEFAULT_SAMPLE_FORMAT, "default"
+
+
 def advertised_format(
     root: str,
     device: devices.MicrophoneDevice,
@@ -100,32 +129,18 @@ def advertised_format(
     from microphone_cli.cli._commands.inspect import _formats_rates_channels
 
     formats, rates, adv_channels = _formats_rates_channels(root, device)
-    source: dict[str, str] = {}
 
-    if rate is None:
-        rate, source["rate"] = (rates[0], "advertised") if rates else (DEFAULT_RATE, "default")
-    else:
-        source["rate"] = "explicit"
-    if channels is None:
-        if adv_channels:
-            channels, source["channels"] = adv_channels, "advertised"
-        else:
-            channels, source["channels"] = DEFAULT_CHANNELS, "default"
-    else:
-        source["channels"] = "explicit"
-    if sample_format is None:
-        gst = _ALSA_TO_GST_FORMAT.get(formats[0]) if formats else None
-        if gst:
-            sample_format, source["sample_format"] = gst, "advertised"
-        else:
-            sample_format, source["sample_format"] = DEFAULT_SAMPLE_FORMAT, "default"
-    else:
-        source["sample_format"] = "explicit"
+    rate, rate_source = _resolved_rate(rate, rates)
+    channels, channels_source = _resolved_channels(channels, adv_channels)
+    sample_format, format_source = _resolved_sample_format(sample_format, formats)
+    source = {
+        "rate": rate_source,
+        "channels": channels_source,
+        "sample_format": format_source,
+    }
 
     return engine.AudioFormat(rate=rate, channels=channels, sample_format=sample_format), source
 
-
-_JSON_HELP = "Emit structured JSON."
 
 #: Every key :func:`_payload` emits. Exported so a test (and a reader) can
 #: check the contract in one place instead of key-by-key.
@@ -527,7 +542,7 @@ def _launch(
         handle.close()
 
 
-def cmd_stream_audio(args: argparse.Namespace) -> int:
+def cmd_stream_audio(args: argparse.Namespace) -> None:
     json_mode = bool(getattr(args, "json", False))
     root = getattr(args, "root", "/") or "/"
 
@@ -570,7 +585,7 @@ def cmd_stream_audio(args: argparse.Namespace) -> int:
             pid=None,
         )
         _emit(data, json_mode=json_mode)
-        return 0
+        return
 
     cap = engine.require_engine()
     engine.require_elements(cap, _required_elements(args.encode))
@@ -589,7 +604,7 @@ def cmd_stream_audio(args: argparse.Namespace) -> int:
             pid=None,
         )
         _emit(data, json_mode=json_mode)
-        return 0
+        return
 
     # --apply: enforce access before anything is spawned, so a busy or
     # forbidden device is the typed error rather than a gst-launch crash.
@@ -610,7 +625,6 @@ def cmd_stream_audio(args: argparse.Namespace) -> int:
         pid=proc.pid,
     )
     _emit(data, json_mode=json_mode)
-    return 0
 
 
 def _emit(data: dict[str, object], *, json_mode: bool) -> None:
@@ -665,17 +679,16 @@ def stream_sections() -> list[dict[str, object]]:
     ]
 
 
-def cmd_stream_overview(args: argparse.Namespace) -> int:
+def cmd_stream_overview(args: argparse.Namespace) -> None:
     emit_overview(
         "microphone stream",
         stream_sections(),
         json_mode=bool(getattr(args, "json", False)),
     )
-    return 0
 
 
-def _no_verb(args: argparse.Namespace) -> int:
-    return cmd_stream_overview(args)
+def _no_verb(args: argparse.Namespace) -> None:
+    cmd_stream_overview(args)
 
 
 # --- registration -------------------------------------------------------------
@@ -715,7 +728,7 @@ def register(sub: argparse._SubParsersAction) -> None:
             "Dry-run by default: nothing is opened until --apply."
         ),
     )
-    p.add_argument("--json", action="store_true", help=_JSON_HELP)
+    p.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     p.set_defaults(func=_no_verb, json=False)
 
     # parser_class must propagate, or this noun's parse errors bypass the
@@ -726,7 +739,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         "overview",
         help="Describe the stream verb group (verbs, hardware split, attachment).",
     )
-    ov.add_argument("--json", action="store_true", help=_JSON_HELP)
+    ov.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     ov.set_defaults(func=cmd_stream_overview)
 
     audio = noun_sub.add_parser(
@@ -739,7 +752,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="Stable device id, or a unique substring of one (see 'microphone list'). "
         "A bare hw:N is refused: ALSA card numbering is plug-order, not identity.",
     )
-    audio.add_argument("--json", action="store_true", help=_JSON_HELP)
+    audio.add_argument("--json", action="store_true", help=JSON_FLAG_HELP)
     audio.add_argument(
         "--apply",
         action="store_true",
