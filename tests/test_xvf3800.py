@@ -151,6 +151,21 @@ def test_read_int32_and_uint32(monkeypatch: pytest.MonkeyPatch) -> None:
     assert dev2.read("DOA_VALUE") == [7, 9]
 
 
+def test_read_uint8_short_reply_raises_env_error() -> None:
+    from microphone_cli.xvf3800 import Xvf3800
+
+    def transfer(request_type, request, value, index, data_or_length):
+        # VERSION wants 3 uint8 values + status byte; only send status + 1 byte.
+        return b"\x00\x01"
+
+    chip = Xvf3800(transfer)
+    with pytest.raises(CliError) as exc:
+        chip.read("VERSION")
+    assert exc.value.code == EXIT_ENV_ERROR
+    assert "short reply reading VERSION" in exc.value.message
+    assert "1 of 3 bytes" in exc.value.message
+
+
 def test_read_write_only_is_user_error(monkeypatch: pytest.MonkeyPatch) -> None:
     dev, fake = install(monkeypatch)
     with pytest.raises(CliError) as exc:
@@ -189,6 +204,24 @@ def test_write_uint8_and_int32(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fake.calls[1]["payload"] == struct.pack("<i", 1)
     dev.write("AEC_RESET_MIN_IDLE_TIME", [2])
     assert fake.calls[2]["payload"] == struct.pack("<I", 2)
+
+
+def test_write_uint8_out_of_range_is_user_error_and_sends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dev, fake = install(monkeypatch)
+    with pytest.raises(CliError) as exc:
+        dev.write("LED_BRIGHTNESS", [256])
+    assert exc.value.code == EXIT_USER_ERROR
+    assert "256" in exc.value.message
+    assert fake.calls == []
+
+    dev2, fake2 = install(monkeypatch)
+    with pytest.raises(CliError) as exc2:
+        dev2.write("LED_BRIGHTNESS", [-1])
+    assert exc2.value.code == EXIT_USER_ERROR
+    assert "-1" in exc2.value.message
+    assert fake2.calls == []
 
 
 def test_write_read_only_is_user_error_and_sends_nothing(

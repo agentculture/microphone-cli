@@ -327,6 +327,24 @@ def test_gain_set_dry_run_plans_without_touching_hardware(
     assert transfer.calls == []
 
 
+@pytest.mark.parametrize("bad_value", ["1.5", "-0.1", "nan", "inf"])
+def test_gain_set_rejects_out_of_range_or_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_run: FakeAmixerRun,
+    bad_value: str,
+) -> None:
+    device = array_device()
+    _patch_resolve(monkeypatch, device)
+    transfer = FakeFirmwareTransfer()
+    _patch_firmware(monkeypatch, transfer)
+
+    rc = run_gain(["set", device.stable_id, bad_value, "--apply"])
+
+    assert rc == EXIT_USER_ERROR
+    assert all("cset" not in call for call in fake_run.calls)
+    assert transfer.calls == []
+
+
 def test_gain_set_dry_run_target_firmware_on_non_array_is_user_error(
     monkeypatch: pytest.MonkeyPatch, fake_run: FakeAmixerRun
 ) -> None:
