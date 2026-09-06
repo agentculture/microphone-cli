@@ -67,7 +67,9 @@ def test_list_audio_access_absent_when_no_dev_node_in_fixture() -> None:
     report = list_devices.build_report(tree("host-baseline"))
     (payload,) = report["devices"]
     assert payload["audio_access"]["state"] == "absent"
-    assert payload["audio_access"]["path"] == "/dev/snd/pcmC1D0c"
+    # Root-joined: a fixture never probes the host's real /dev/snd node.
+    assert payload["audio_access"]["path"].endswith("/dev/snd/pcmC1D0c")
+    assert payload["audio_access"]["path"].startswith(tree("host-baseline"))
 
 
 def test_list_two_arrays_reports_both_devices() -> None:

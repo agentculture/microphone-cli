@@ -62,7 +62,9 @@ def _capture_pcm_device(root: str, index: int) -> int:
 def _audio_node_path(root: str, device: MicrophoneDevice) -> str:
     """The ALSA capture PCM device node for ``device``, e.g. ``/dev/snd/pcmC1D0c``."""
     pcm_device = _capture_pcm_device(root, device.card_index)
-    return f"/dev/snd/pcmC{device.card_index}D{pcm_device}c"
+    # Root-joined so a fixture tree never probes the host's real /dev/snd node
+    # (found on hardware: fixture card 1 collided with a real card 1).
+    return os.path.join(root, f"dev/snd/pcmC{device.card_index}D{pcm_device}c")
 
 
 def _access_payload(report: AccessReport) -> dict[str, object]:

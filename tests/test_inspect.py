@@ -66,7 +66,7 @@ def _patch_firmware_transport(monkeypatch, node: str = "/dev/bus/usb/005/007") -
         return [{"node": node, "vendor": vendor, "product": product, "serial": serial}]
 
     monkeypatch.setattr(usbctl, "find_devices", fake_find_devices)
-    monkeypatch.setattr(usbctl, "open_device", lambda path: 42)
+    monkeypatch.setattr(usbctl, "open_device", lambda path, **kw: 42)
     monkeypatch.setattr(xvf3800.os, "close", lambda fd: None)
     fake = FakeIoctl(_firmware_replies())
     monkeypatch.setattr(usbctl, "_ioctl", fake)
@@ -229,7 +229,7 @@ def test_inspect_array_open_permission_error_reports_but_succeeds(monkeypatch, c
         lambda root, vendor=None, product=None, serial=None: [{"node": "/dev/bus/usb/005/007"}],
     )
 
-    def deny(node: str) -> int:
+    def deny(node: str, **_kw: object) -> int:
         raise CliError(
             code=EXIT_ENV_ERROR,
             message=f"permission denied opening {node}",

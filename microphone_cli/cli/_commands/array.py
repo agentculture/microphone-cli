@@ -115,7 +115,10 @@ def _open_array(
                 "retry; `microphone list --json` shows what is attached right now."
             ),
         )
-    return Xvf3800(usbctl.open_device(matches[0]["node"]), timeout_ms=timeout_ms)
+    fd = usbctl.open_device(
+        matches[0]["node"], vendor=matches[0].get("vendor"), product=matches[0].get("product")
+    )
+    return Xvf3800(fd, timeout_ms=timeout_ms)
 
 
 def _transport_error(exc: OSError, device: devices.MicrophoneDevice) -> CliError:

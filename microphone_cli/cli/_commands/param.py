@@ -118,7 +118,9 @@ def _open_array(device: MicrophoneDevice, root: str) -> Xvf3800:
             message=f"cannot locate a USB node for {device.stable_id}",
             remediation="Replug the device and retry; check `microphone list --json`.",
         )
-    fd = open_device(matches[0]["node"])
+    fd = open_device(
+        matches[0]["node"], vendor=matches[0].get("vendor"), product=matches[0].get("product")
+    )
     return Xvf3800(fd)
 
 

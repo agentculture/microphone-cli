@@ -139,7 +139,9 @@ def _firmware_payload(root: str, device: MicrophoneDevice) -> dict[str, object] 
 
     node = matches[0]["node"]
     try:
-        fd = usbctl.open_device(node)
+        fd = usbctl.open_device(
+            node, vendor=matches[0].get("vendor"), product=matches[0].get("product")
+        )
     except CliError as exc:
         return {"error": exc.message}
 

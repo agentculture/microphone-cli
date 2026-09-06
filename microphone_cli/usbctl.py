@@ -59,7 +59,17 @@ _IOC_READ = 2
 #: vendored reachy_mini script uses 100 s and so do we.
 DEFAULT_TIMEOUT_MS = 100000
 
-_UDEV_RULE = 'SUBSYSTEM=="usb", ATTR{idVendor}=="38fb", ATTR{idProduct}=="1001", MODE="0666"'
+
+def udev_rule(vendor: str | None, product: str | None) -> str:
+    """Return the udev rule line that grants non-root access to one USB id.
+
+    Names the ids of the device that was actually refused; falls back to
+    ``XXXX``/``YYYY`` placeholders when they are unknown so the hint never
+    points at the wrong board.
+    """
+    vid = vendor.lower() if vendor else "XXXX"
+    pid = product.lower() if product else "YYYY"
+    return f'SUBSYSTEM=="usb", ATTR{{idVendor}}=="{vid}", ATTR{{idProduct}}=="{pid}", MODE="0666"'
 
 
 def _ioc(direction: int, type_: int, nr: int, size: int) -> int:
@@ -216,8 +226,12 @@ def find_devices(
     return out
 
 
-def open_device(node: str) -> int:
-    """Open a ``/dev/bus/usb/BBB/DDD`` node ``O_RDWR`` and return the fd."""
+def open_device(node: str, *, vendor: str | None = None, product: str | None = None) -> int:
+    """Open a ``/dev/bus/usb/BBB/DDD`` node ``O_RDWR`` and return the fd.
+
+    ``vendor``/``product`` are only used to make the permission-denied
+    remediation name the refused device's own USB ids.
+    """
     try:
         return os.open(node, os.O_RDWR)
     except PermissionError as exc:
@@ -226,7 +240,8 @@ def open_device(node: str) -> int:
             message=f"permission denied opening {node}",
             remediation=(
                 "Grant your user access to the device with a udev rule, then replug it:\n"
-                f"  echo '{_UDEV_RULE}' | sudo tee /etc/udev/rules.d/99-microphone-cli.rules\n"
+                f"  echo '{udev_rule(vendor, product)}' | sudo tee "
+                "/etc/udev/rules.d/99-microphone-cli.rules\n"
                 "  sudo udevadm control --reload-rules && sudo udevadm trigger"
             ),
         ) from exc
@@ -234,7 +249,7 @@ def open_device(node: str) -> int:
         raise CliError(
             code=EXIT_USER_ERROR,
             message=f"no such USB device node: {node}",
-            remediation="Run `microphone device list` to see the nodes that exist right now.",
+            remediation="Run `microphone list` to see the devices that exist right now.",
         ) from exc
     except OSError as exc:
         raise CliError(

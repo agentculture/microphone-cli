@@ -514,7 +514,7 @@ def test_open_array_opens_the_matching_node(monkeypatch: pytest.MonkeyPatch) -> 
 
     opened: list[str] = []
 
-    def _open(node: str) -> int:
+    def _open(node: str, **_kw: object) -> int:
         opened.append(node)
         return 4242
 

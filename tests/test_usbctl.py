@@ -168,12 +168,27 @@ def test_open_device_permission_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(usbctl.os, "open", denied)
     with pytest.raises(CliError) as exc:
-        usbctl.open_device("/dev/bus/usb/001/007")
+        usbctl.open_device("/dev/bus/usb/001/007", vendor="2886", product="001A")
     assert exc.value.code == EXIT_ENV_ERROR
     assert 'SUBSYSTEM=="usb"' in exc.value.remediation
-    assert 'ATTR{idVendor}=="38fb"' in exc.value.remediation
-    assert 'ATTR{idProduct}=="1001"' in exc.value.remediation
+    # The hint names the ids of the device that was actually refused (found on
+    # hardware: a ReSpeaker 2886:001a was told to add a rule for 38fb:1001).
+    assert 'ATTR{idVendor}=="2886"' in exc.value.remediation
+    assert 'ATTR{idProduct}=="001a"' in exc.value.remediation
     assert 'MODE="0666"' in exc.value.remediation
+
+
+def test_open_device_permission_error_without_ids_uses_placeholders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def denied(*_args: object, **_kw: object) -> int:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(usbctl.os, "open", denied)
+    with pytest.raises(CliError) as exc:
+        usbctl.open_device("/dev/bus/usb/001/007")
+    assert 'ATTR{idVendor}=="XXXX"' in exc.value.remediation
+    assert "38fb" not in exc.value.remediation
 
 
 def test_open_device_missing_node(monkeypatch: pytest.MonkeyPatch) -> None:

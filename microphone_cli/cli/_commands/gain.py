@@ -97,7 +97,9 @@ def _open_firmware(device: MicrophoneDevice, root: str) -> Xvf3800:
                 "reattach the device and retry; `microphone device list` shows what's attached"
             ),
         )
-    fd = open_device(matches[0]["node"])
+    fd = open_device(
+        matches[0]["node"], vendor=matches[0].get("vendor"), product=matches[0].get("product")
+    )
     return Xvf3800(fd)
 
 
