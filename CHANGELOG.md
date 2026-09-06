@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-09-06
+
+### Changed
+
+- **`CLAUDE.md` re-initialized from the seed placeholder into a full runtime prompt** — records the repo's actual state (renamed template scaffold, no microphone domain code yet, and the specific files still carrying template prose), the build/test/lint/rubric-gate command set, the CLI architecture (the `register(sub)` dispatch pattern, the `CliError` / stream-split / `--json` contracts the rubric enforces, and the `parser_class` propagation nested nouns need), the checklist for adding a verb or noun, and the CI/release and vendored-skill conventions.
+- **`README.md` corrected and refreshed** — the quickstart told readers to run `microphone-cli`, which does not exist: `pyproject.toml` declares the console script as `microphone`, so `uv run microphone-cli whoami` failed with `Failed to spawn`. Commands now use `microphone`, with a note that argparse still prints `microphone-cli` as the program name. Also adds a scaffold-status banner, drops the stale skill count (said 11; there are 19 vendored directories), fixes the backend description to name this agent rather than the template, and replaces the template-only rename section with a Development section.
+
+### Fixed
+
+- **`CLAUDE.md` claimed `culture.yaml` declares `backend: claude`** — it declares `colleague`, which is why `AGENTS.colleague.md` is the resident prompt file `doctor` checks for. The new file records the correct backend-to-prompt-file mapping.
+
 ## [0.8.0] - 2026-09-05
 
 ### Added

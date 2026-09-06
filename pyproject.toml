@@ -1,6 +1,6 @@
 [project]
 name = "microphone-cli"
-version = "0.8.0"
+version = "0.8.1"
 description = "Agent-first CLI for USB microphones and microphone arrays: enumerate devices, select and inspect channels, control gain and sample format, and read direction-of-arrival from array firmware."
 readme = "README.md"
 license = "Apache-2.0"
