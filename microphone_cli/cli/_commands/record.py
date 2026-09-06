@@ -477,11 +477,14 @@ def _apply(
                 remediation="run the printed pipeline by hand to see gst-launch-1.0's own "
                 "diagnostics, or re-run with --probe to check the engine and device first",
             )
-        if size > max_bytes:
-            # The cap is polled, so a pipeline that blows it and exits inside a
-            # single poll interval is never stopped by this module — the file on
-            # disk is over the cap the caller asked for, and saying "eos, all
-            # good" about it would be a lie. The artifact is deliberately kept:
+        if size > max_bytes and stopped_reason != "max_bytes":
+            # The cap is polled. When *this loop* stopped the child at the cap,
+            # an overshoot of one poll interval is the bound doing its job and
+            # is reported as bytes_written. But a pipeline that blows the cap
+            # and exits on its own inside a single poll interval was never
+            # stopped by this module — the file on disk is over the cap the
+            # caller asked for, and saying "eos, all good" about it would be a
+            # lie. The artifact is deliberately kept:
             # deleting a recording the caller may still want is not this verb's
             # decision to make.
             raise CliError(

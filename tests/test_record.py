@@ -417,10 +417,12 @@ def test_apply_stops_on_the_max_bytes_bound(
     _activation_log: str,
 ) -> None:
     out_path = str(tmp_path / "clip.wav")
-    # Two 50-byte writes land exactly on the cap: the loop stops the child at
-    # the bound and the artifact honours it, which is the success case. An
-    # artifact that ends up *over* the cap is an error — see the test below.
-    proc = FakeProc(out_path, chunk=50, exit_after=None)
+    # 64-byte chunks overshoot a 100-byte cap by one poll interval: the loop
+    # stops the child at the bound, and that overshoot is reported honestly as
+    # bytes_written rather than failing the run. An artifact that ends up over
+    # the cap because the pipeline finished *on its own* is an error — see the
+    # test below.
+    proc = FakeProc(out_path, chunk=64, exit_after=None)
     arm_apply(monkeypatch, proc)
 
     argv = base_argv(out_path, "--json", "--apply", "--duration", "600", "--max-bytes", "100")
@@ -428,7 +430,7 @@ def test_apply_stops_on_the_max_bytes_bound(
     data = payload(capsys)
     assert data["stopped_reason"] == "max_bytes"
     assert proc.terminated is True
-    assert data["bytes_written"] == 100
+    assert data["bytes_written"] == 128
     entry = json.loads(open(_activation_log, encoding="utf-8").read().strip())
     assert entry["params"]["stopped_reason"] == "max_bytes"
 
