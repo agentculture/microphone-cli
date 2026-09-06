@@ -59,10 +59,27 @@ _ATTR_RE = re.compile(r"^;\s*type=(?P<type>[^,]+),access=(?P<access>[^,]+),(?P<r
 # No trailing ``$``: ``.*`` already runs to the end of the (single) line, and
 # the anchor only gives the engine a reason to backtrack (SonarCloud S8786).
 _VALUE_LINE_RE = re.compile(r"^:\s*values=(?P<values>.*)")
-# Possessive ``\w++`` (Python >= 3.11): once a word run is consumed it is never
-# given back, so a long run without ``=`` cannot make ``findall`` quadratic
-# (SonarCloud S8786).
-_KV_RE = re.compile(r"(\w++)=(-?\d+)")
+
+
+def _int_pairs(rest: str) -> list[tuple[str, int]]:
+    """``"values=1,min=0,max=30,step=0"`` -> ``[("values", 1), ("min", 0), ...]``.
+
+    Plain splitting instead of a regex: the field is a comma-separated list of
+    ``key=int`` tokens, and a scanning regex here was the one SonarCloud
+    flagged as super-linear (S8786). Tokens that are not ``key=int`` are
+    skipped, matching the old ``findall`` behaviour.
+    """
+    pairs: list[tuple[str, int]] = []
+    for token in rest.split(","):
+        key, sep, value = token.strip().partition("=")
+        if not sep:
+            continue
+        try:
+            pairs.append((key, int(value)))
+        except ValueError:
+            continue
+    return pairs
+
 
 _PREFERRED_NAME_HINTS = ("capture volume", "mic")
 
@@ -157,11 +174,11 @@ def _apply_attr_line(current: dict[str, object], line: str) -> bool:
         return False
     current["type"] = attr.group("type")
     current["access"] = attr.group("access")
-    for key, value in _KV_RE.findall(attr.group("rest")):
+    for key, value in _int_pairs(attr.group("rest")):
         if key == "values":
-            current["count"] = int(value)
+            current["count"] = value
         elif key in ("min", "max", "step"):
-            current[key] = int(value)
+            current[key] = value
     return True
 
 
