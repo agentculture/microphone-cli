@@ -228,7 +228,7 @@ def activation_scope(
     so nothing downstream mistakes it for "the action failed" and retries a
     change that already took effect.
     """
-    target = path if path is not None else log_path()
+    target: Path = path if path is not None else log_path()
     _ensure_log_writable(target)
 
     activation = Activation(

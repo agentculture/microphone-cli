@@ -50,7 +50,8 @@ _AMIXER_MISSING_HINT = (
 # the optional suffix the second block's value lines were attributed to the
 # first control, so set_gain's readback reported the wrong control's value.
 _NUMID_RE = re.compile(
-    r"^numid=(?P<numid>\d+),iface=(?P<iface>[^,]+),name='(?P<name>.*?)'(?:,index=(?P<index>\d+))?$"
+    r"^numid=(?P<numid>\d+),iface=(?P<iface>[^,]+),name='(?P<name>[^']*)'"
+    r"(?:,index=(?P<index>\d+))?$"
 )
 # "; type=INTEGER,access=rw---R--,values=1,min=0,max=30,step=0"
 _ATTR_RE = re.compile(r"^;\s*type=(?P<type>[^,]+),access=(?P<access>[^,]+),(?P<rest>.*)$")
@@ -130,6 +131,60 @@ def _parse_values(raw: str) -> tuple[int | str, ...]:
     return tuple(out)
 
 
+def _header_fields(line: str) -> dict[str, object] | None:
+    """Parse a ``numid=...`` header line into a fresh ``current`` dict, or
+    ``None`` if ``line`` is not a header."""
+    header = _NUMID_RE.match(line)
+    if header is None:
+        return None
+    return {
+        "numid": int(header.group("numid")),
+        "iface": header.group("iface"),
+        "name": header.group("name"),
+    }
+
+
+def _apply_attr_line(current: dict[str, object], line: str) -> bool:
+    """Merge a ``; type=...`` attribute line into ``current``. Returns whether
+    ``line`` was an attribute line at all."""
+    attr = _ATTR_RE.match(line)
+    if attr is None:
+        return False
+    current["type"] = attr.group("type")
+    current["access"] = attr.group("access")
+    for key, value in _KV_RE.findall(attr.group("rest")):
+        if key == "values":
+            current["count"] = int(value)
+        elif key in ("min", "max", "step"):
+            current[key] = int(value)
+    return True
+
+
+def _apply_value_line(current: dict[str, object], line: str) -> bool:
+    """Merge a ``: values=...`` line into ``current``. Returns whether
+    ``line`` was a value line at all."""
+    value_line = _VALUE_LINE_RE.match(line)
+    if value_line is None:
+        return False
+    current["values"] = _parse_values(value_line.group("values"))
+    return True
+
+
+def _control_from_fields(fields: dict[str, object]) -> MixerControl:
+    return MixerControl(
+        numid=fields["numid"],  # type: ignore[arg-type]
+        iface=fields["iface"],  # type: ignore[arg-type]
+        name=fields["name"],  # type: ignore[arg-type]
+        control_type=fields.get("type", ""),  # type: ignore[arg-type]
+        access=fields.get("access", ""),  # type: ignore[arg-type]
+        count=fields.get("count", 0),  # type: ignore[arg-type]
+        min=fields.get("min"),  # type: ignore[arg-type]
+        max=fields.get("max"),  # type: ignore[arg-type]
+        step=fields.get("step"),  # type: ignore[arg-type]
+        values=fields.get("values", ()),  # type: ignore[arg-type]
+    )
+
+
 def list_controls(card: str | int, *, run: RunFunc = subprocess.run) -> list[MixerControl]:
     """Parse ``amixer -c <card> contents`` into every :class:`MixerControl`.
 
@@ -141,52 +196,22 @@ def list_controls(card: str | int, *, run: RunFunc = subprocess.run) -> list[Mix
     controls: list[MixerControl] = []
     current: dict[str, object] | None = None
 
-    def flush() -> None:
-        if current is None:
-            return
-        controls.append(
-            MixerControl(
-                numid=current["numid"],  # type: ignore[arg-type]
-                iface=current["iface"],  # type: ignore[arg-type]
-                name=current["name"],  # type: ignore[arg-type]
-                control_type=current.get("type", ""),  # type: ignore[arg-type]
-                access=current.get("access", ""),  # type: ignore[arg-type]
-                count=current.get("count", 0),  # type: ignore[arg-type]
-                min=current.get("min"),  # type: ignore[arg-type]
-                max=current.get("max"),  # type: ignore[arg-type]
-                step=current.get("step"),  # type: ignore[arg-type]
-                values=current.get("values", ()),  # type: ignore[arg-type]
-            )
-        )
-
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        header = _NUMID_RE.match(line)
+        header = _header_fields(line)
         if header is not None:
-            flush()
-            current = {
-                "numid": int(header.group("numid")),
-                "iface": header.group("iface"),
-                "name": header.group("name"),
-            }
+            if current is not None:
+                controls.append(_control_from_fields(current))
+            current = header
             continue
         if current is None:
             continue
-        attr = _ATTR_RE.match(line)
-        if attr is not None:
-            current["type"] = attr.group("type")
-            current["access"] = attr.group("access")
-            for key, value in _KV_RE.findall(attr.group("rest")):
-                if key == "values":
-                    current["count"] = int(value)
-                elif key in ("min", "max", "step"):
-                    current[key] = int(value)
+        if _apply_attr_line(current, line):
             continue
-        value_line = _VALUE_LINE_RE.match(line)
-        if value_line is not None:
-            current["values"] = _parse_values(value_line.group("values"))
-            continue
-    flush()
+        _apply_value_line(current, line)
+
+    if current is not None:
+        controls.append(_control_from_fields(current))
     return controls
 
 
